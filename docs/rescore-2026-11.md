@@ -1,6 +1,6 @@
 # Re-scoring the frameworks' own evaluations on the November 2026 release, 4 Nov 2026
 
-Step 2 of the replication plan, first three frameworks. Each script runs the same code on the 2023 bucket (`model_id_8583a5c2_v0`) and on the November 2026 release (`distributed_model_2026_11`), so every table has three columns: the number the team published, this code on the 2023 bucket, this code on the 2026 release. Where column two matches column one the method is reproduced and column three is a like-for-like comparison. Scripts: `scripts/rescore_som.py`, `scripts/rescore_npl.py`, `scripts/rescore_nga.py`, shared loader `scripts/grrr_releases.py`; raw results `outputs/rescore_*.csv`.
+Step 2 of the replication plan, five frameworks. Each script runs the same code on the 2023 bucket (`model_id_8583a5c2_v0`) and on the November 2026 release (`distributed_model_2026_11`), so every table has three columns: the number the team published, this code on the 2023 bucket, this code on the 2026 release. Where column two matches column one the method is reproduced and column three is a like-for-like comparison. Scripts: `scripts/rescore_som.py`, `scripts/rescore_npl.py`, `scripts/rescore_nga.py`, shared loader `scripts/grrr_releases.py`; raw results `outputs/rescore_*.csv`.
 
 ## Somalia: GRRR reanalysis against the SWALIM gauges
 
@@ -80,10 +80,35 @@ Reproduces notebook 08 on the multistate branch of `ds-aa-nga-flooding`: GRDC da
 
 **Reading.** The 2023 column gives the published annual-peak Spearman of 0.76 at Yidere Bode. Five of the nine GRDC stations pass the notebook's completeness filters; Wuroboki, Umaisha, Ibi, Baro and Onitsha have 7–10 valid years and are reported for daily correlation only. On the 2026 release the annual-peak correlation rises at Yidere Bode (0.76 → 0.83), Lokoja (0.57 → 0.76) and Kende (0.45 → 0.57) and falls at Makurdi (0.43 → 0.34); daily correlation rises at Makurdi and Lokoja and falls at Kende and Yidere Bode. The 3-yr exceedance agreement improves at Lokoja (F1 0.52 → 0.74) and Kende (0.67 → 0.83) and worsens at Yidere Bode (0.83 → 0.69) and Makurdi (0.67 → 0.55). Mixed, on 16–38 years per station; no single direction.
 
+## Chad: model annual peaks at N'Djamena against the DRE observed level
+
+Reproduces `pa-aa-tcd-flooding/exploration/dre_glofas.md` and the 2025 document's annex: annual peak of the DRE observed level at N'Djamena (station TP) and of the model, 2003–2022 with 2006 and 2008 dropped for incomplete observations (18 years); the 4-yr level on each side as the quantile 1 − 1/4 of the annual peaks; years each side flags; Spearman of the peaks; mean days the model peak precedes the observed peak. GloFAS v4 reanalysis from the repo's processed blob is run through the same code. The GRRR basin is the largest river within 10 km of the GloFAS cell (`hybas_1120734190`), not yet confirmed.
+
+| Model | years | observed 4-yr years | model 4-yr years | hits of 5 | false negatives | false positives | peak ρ | days early, mean |
+|---|---|---|---|---|---|---|---|---|
+| GloFAS v4 reanalysis (published: 3 of 5, FN 2019 2020, FP 2003 2005, 31 d early) | 18 | 2010,2012,2019,2020,2022 | 2003,2005,2010,2012,2022 | 3 | 2019,2020 | 2003,2005 | 0.69 | 31 |
+| GRRR, 2023 bucket | 18 | 2010,2012,2019,2020,2022 | 2010,2012,2019,2020,2022 | 5 | none | none | 0.83 | 20 |
+| GRRR, November 2026 release | 18 | 2010,2012,2019,2020,2022 | 2012,2018,2019,2020,2022 | 4 | 2010 | 2018 | 0.74 | 31 |
+
+**Reading.** GloFAS through this code gives the document's numbers exactly. The 2023 bucket's GRRR flags the same five years as the gauge with no miss and no false alarm, peak ρ 0.83, 20 days early. The November 2026 release misses 2010 and adds 2018, peak ρ 0.74, and its peak comes 31 days early, like GloFAS. At N'Djamena the new model is worse than the old on the framework's own test, on 18 years and five flood years.
+
+## Bangladesh: GRRR reanalysis events against FFWC severe floods at Bahadurabad
+
+Observed events from the FFWC record on the shared drive: water level at or above the danger level (19.5 m) plus 0.85 m for three consecutive days, as the framework defines a severe flood; seven events, 1988, 2012, 2016, 2017, 2019 and two in 2020 (the 1987–2019 file holds only days above the danger level, which is enough for this definition but not for annual peaks). Model events above RP5, collapsed with a 7-day gap, matched within ±7 days, 1987–2020. No published detection figure for this station is on the KB page. GloFAS v4 is not yet run here: its Bangladesh files are per-year grids that need the Bahadurabad point extracted. Basin `hybas_4121501030`, largest river within 10 km, 2-yr flow 69,700 m³/s, plausible for the Jamuna but unconfirmed.
+
+| Release | RP5 convention | threshold m³/s | observed events | model events | matched | misses | false alarms |
+|---|---|---|---|---|---|---|---|
+| 2023 | shipped | 57,063 | 7 | 10 | 3 | 4 | 6 |
+| 2023 | quantile_full | 57,295 | 7 | 9 | 3 | 4 | 5 |
+| 2026 | shipped | 80,205 | 7 | 11 | 3 | 4 | 8 |
+| 2026 | quantile_full | 82,242 | 7 | 8 | 2 | 5 | 6 |
+
+**Reading.** Three of seven severe floods matched on both releases with the shipped RP5; the new release produces more model events and more false alarms (8 against 6), and two of seven with the quantile threshold. Flat to slightly worse. The miss set is the same: 1988, 2016, 2017 and one of the 2020 pair. A reanalysis above RP5 is a crude stand-in for the framework's readiness trigger (≥50% of the GloFAS ensemble above RP5 at up to 15 days), so this is a station-skill reading, not a trigger one.
+
 ## What this says so far
 
 - The published station-skill numbers are reproducible from the public buckets and the team's gauge records, which is the precondition for any benchmark claim.
 - The new model tracks the Somali gauges more closely day to day and detects more of their RP3 episodes, at the cost of a later signal (lag) and more frequent firing at Dollow. In Nigeria and Nepal the picture is mixed or flat: better at some stations, worse at others, no change in the Chatara failure.
 - None of this is a trigger-outcome result. Those need the frameworks' own thresholds refitted on the release (the magnitudes differ) and, for the forecast side, the ten-season reforecast rather than the reanalysis.
 
-Still to do in step 2: Chad (DRE level and FloodScan extent), Bangladesh (FFWC levels), Uganda (impact backtest), and the Niger new question; the five real-gauge basin mappings remain to be confirmed first.
+Still to do in step 2: Uganda (the impact backtest is a pipeline with zones and catch windows; adding a GRRR leg means running it through that pipeline), the Niger new question, GloFAS for Bangladesh, and Chad's FloodScan province check; the five real-gauge basin mappings remain to be confirmed first.
