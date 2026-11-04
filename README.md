@@ -47,6 +47,7 @@ about Google's November 2026 data release.
 | `scripts/rescore_nga.py` | Nigeria: GRRR reanalysis against GRDC observed discharge, daily and annual-peak Spearman and 3/5-yr exceedance F1, reproducing `ds-aa-nga-flooding` notebook 08. Results of all three in `docs/rescore-2026-11.md` |
 | `scripts/rescore_tcd.py` | Chad: model annual peaks at N'Djamena against the DRE observed level, 4-yr exceedance years, peak correlation and days early, reproducing the 2025 document's annex; GloFAS v4 included |
 | `scripts/rescore_bgd.py` | Bangladesh: GRRR reanalysis events above RP5 against FFWC severe floods (danger level + 0.85 m for 3 days) at Bahadurabad |
+| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF rapid-response flood allocations. `outputs/year_ledger.csv` |
 
 ## Running
 
@@ -61,6 +62,7 @@ uv run scripts/rescore_som.py --release 2026                # needs DSCI_AZ_BLOB
 uv run scripts/rescore_nga.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
 uv run scripts/rescore_tcd.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
 uv run scripts/rescore_bgd.py --release 2026                # needs AA_DATA_DIR
+uv run scripts/year_ledger.py                               # needs blob and AA_DATA_DIR; writes outputs/year_ledger.csv
 ```
 
 The Google data is public (CC-BY-4.0) and read anonymously from

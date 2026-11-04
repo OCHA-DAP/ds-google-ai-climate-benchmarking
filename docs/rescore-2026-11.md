@@ -105,6 +105,10 @@ Observed events from the FFWC record on the shared drive: water level at or abov
 
 **Reading.** Three of seven severe floods matched on both releases with the shipped RP5; the new release produces more model events and more false alarms (8 against 6), and two of seven with the quantile threshold. Flat to slightly worse. The miss set is the same: 1988, 2016, 2017 and one of the 2020 pair. A reanalysis above RP5 is a crude stand-in for the framework's readiness trigger (≥50% of the GloFAS ensemble above RP5 at up to 15 days), so this is a station-skill reading, not a trigger one.
 
+## Year by year
+
+`scripts/year_ledger.py` builds the table the frameworks use themselves: per framework and year, whether the framework's published backtest fired, whether each Google release's reanalysis crossed the framework's level at the trigger station (Nigeria: the endorsed 6-of-10 same-day rule; Somalia: the reference gauge basin over RP5 in either season; Nepal RP5; Chad 4-yr; Bangladesh RP5; Niger RP5 at Niamey), whether the framework's observed record says flood, EM-DAT people affected by floods (team blob mirror), and CERF rapid-response flood allocations (shared-drive export, 2006-2021 only; the current mirror sits behind the database private endpoint and needs the Databricks tunnel). The Google level here is the release's own return-period table over its whole record, not the within-window quantile the re-scores use, so the Chad flags differ from the re-score table by one or two years. Output: `outputs/year_ledger.csv`; figure on the working page.
+
 ## What this says so far
 
 - The published station-skill numbers are reproducible from the public buckets and the team's gauge records, which is the precondition for any benchmark claim.
