@@ -38,6 +38,9 @@ about Google's November 2026 data release.
 | `docs/superpowers/specs/` | Design specs, once the protocol is agreed |
 | `scripts/grrr_2026_11.py` | Open the public GRRR release anonymously, fetch one basin, verify the lead-0 identity |
 | `scripts/check_grrr_coverage.py` | Map every basin outlet to a country, count basins with and without predictions, sample time series for missing values |
+| `scripts/stations.py` | The trigger stations of the flood frameworks, one entry per station and season, with the Flood Hub id or coordinates each framework uses |
+| `scripts/map_stations.py` | Map each station to a sub-basin of the release: identity for Flood Hub ids (they share the HydroBASINS numbering), largest river within 10 km for real gauges, flagged for a human check |
+| `scripts/proxy_check.py` | Is the reanalysis a proxy for the reforecast? Per station and lead 1 to 10: daily and seasonal-peak Spearman, bootstrap interval, reforecast-to-reanalysis ratio above the 2-yr level. Results in `docs/proxy-check-2026-11.md` |
 
 ## Running
 
@@ -45,6 +48,8 @@ about Google's November 2026 data release.
 uv sync
 uv run scripts/grrr_2026_11.py subhybas_1121902040          # one basin, prints shapes and the identity check
 uv run scripts/check_grrr_coverage.py --iso NGA SOM NPL     # coverage for named countries, writes outputs/
+uv run scripts/map_stations.py                              # outputs/stations_mapped.csv
+uv run scripts/proxy_check.py                               # outputs/proxy_check.csv, needs the mapping first
 ```
 
 The Google data is public (CC-BY-4.0) and read anonymously from
