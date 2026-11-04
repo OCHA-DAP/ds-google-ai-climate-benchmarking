@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+.claude/settings.local.json
+
+# written by the scripts; regenerate, do not commit
+outputs/
+cache/

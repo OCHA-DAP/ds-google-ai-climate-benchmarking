@@ -1,0 +1,26 @@
+[project]
+name = "ds-google-ai-climate-benchmarking"
+version = "0.1.0"
+description = "Benchmark Google's AI flood forecasts against the models used in OCHA/CERF anticipatory action frameworks"
+requires-python = ">=3.11"
+dependencies = [
+  "xarray>=2025.1",
+  "zarr>=3.0",
+  "gcsfs>=2025.1",
+  "pandas>=2.2",
+  "pyarrow>=18",
+  "geopandas>=1.0",
+  "shapely>=2.0",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.8"]
+
+# Team baseline: ds-knowledge-base/infrastructure/python-tooling.md
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+extend-select = ["I", "UP", "B", "SIM", "RUF"]
+ignore = ["E501"]
