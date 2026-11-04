@@ -4,17 +4,22 @@ The table the frameworks have used themselves (the Somalia deck's "activations, 
 response, year by year"), built for every framework with a Google-evaluable station:
 
 - framework_fired: the framework's own published backtest years (knowledge-base pages);
-- grrr_2023 / grrr_2026: GRRR reanalysis of each release, seasonal peak at or above the
-  release's own return period at the framework's level (Nigeria: the endorsed rule, >= 6 of 10
-  gauges over their own 4-yr level on the same day; Somalia: the reference gauge's basin over
-  RP5 in either season);
-- observed: the framework's validation record says flood that year (DRE 4-yr level at N'Djamena;
-  GRDC 3-yr wet-season peak at Yidere Bode; SWALIM post-2000 RP3 episode at the reference
-  gauges; DHM danger-level crossing; FFWC danger level + 0.85 m for 3 days; ABN 604 cm);
+- grrr_2023 / grrr_2026 / observed: one rule for all three. The threshold is the empirical
+  Weibull level at the framework's return period, fitted on seasonal maxima over the same
+  BASELINE years (1998-2023, restricted to years the observed record covers), and a year is
+  flagged when its seasonal maximum reaches it. Nigeria applies the endorsed rule on top
+  (>= 6 of 10 gauges over their own level on the same day) and its observed record is GRDC
+  discharge at Yidere Bode; Somalia uses the reference gauge of each river (Luuq, Belet Weyne)
+  in either season; Chad the DRE level at N'Djamena; Nepal the DHM level at Chatara (record
+  ends 2012); Niger has no model trigger, so its observed column is the published 604 cm years.
+  Bangladesh's FFWC file holds only days above the danger level, so its observed column keeps
+  the framework's own definition (danger level + 0.85 m for 3 days) and its model columns use
+  the Weibull rule; the two are not on the same footing and the header says so.
+  Each column header carries fires / baseline years, the empirical return period.
 - emdat_affected: EM-DAT total affected by floods in the country that year (team blob mirror;
   check its vintage);
-- cerf_flood_usd: CERF rapid-response allocations tagged Flood for the country that year, from
-  the shared drive export (covers 2006-2021 only; later years are blank, not zero).
+- cerf_flood_usd: CERF rapid-response flood allocations for the country that year, and
+  cerf_aa_usd the anticipatory ones, from the team's OneGMS mirror (dev database, via the tunnel).
 
 Writes outputs/year_ledger.csv. Needs blob and AA_DATA_DIR access.
 """
@@ -30,13 +35,14 @@ import pandas as pd
 from ocha_stratus import emdat
 
 sys.path.insert(0, str(Path(__file__).parent))
-from grrr_releases import reanalysis, shipped_return_periods
+from grrr_releases import reanalysis, weibull_threshold
 from rescore_bgd import load_ffwc_bahadurabad, observed_events
 from rescore_som import GAUGES as SOM_GAUGES
-from rescore_som import episodes, load_level, weibull_threshold
+from rescore_som import load_level
 from rescore_tcd import load_dre_tp
 
 YEARS = list(range(1998, 2026))
+BASELINE = (1998, 2023)
 FRAMEWORKS = {
     "Nigeria 2026": {
         "iso3": "NGA",
@@ -76,6 +82,8 @@ STATION = {
     "Niger 2025": "hybas_1120679000",
 }
 RP_LEVEL = {
+    "Nigeria 2026": 4.0,
+    "Somalia": 5.0,
     "Nepal 2025 (Chatara)": 5.0,
     "Chad 2025": 4.0,
     "Bangladesh 2025 (Bahadurabad)": 5.0,
@@ -83,63 +91,77 @@ RP_LEVEL = {
 }
 
 
-def rp_at(release: str, hid: str, T: float) -> float:
-    sp = shipped_return_periods(release, hid)
-    if T in sp:
-        return sp[T]
-    yT = lambda x: -np.log(-np.log(1 - 1 / x))
-    return sp[2.0] + (sp[5.0] - sp[2.0]) * (yT(T) - yT(2)) / (yT(5) - yT(2))
+def seasonal_max(s: pd.Series, months: list[int] | None) -> pd.Series:
+    x = s if months is None else s[s.index.month.isin(months)]
+    return x.groupby(x.index.year).max().dropna()
 
 
-def season_peak_years(q: pd.Series, months: list[int] | None, thr: float) -> set[int]:
-    s = q if months is None else q[q.index.month.isin(months)]
-    pk = s.groupby(s.index.year).max()
-    return {int(y) for y, v in pk.items() if v >= thr}
+def weibull_flags(
+    s: pd.Series, months, rp: float, baseline: tuple[int, int]
+) -> tuple[set[int], float, int]:
+    """Years whose seasonal maximum reaches the Weibull level at `rp` fitted on the baseline years.
+
+    Returns (years flagged over the whole record, threshold, number of baseline years used).
+    """
+    pk = seasonal_max(s, months)
+    base = pk[(pk.index >= baseline[0]) & (pk.index <= baseline[1])]
+    if len(base) < 8:
+        raise ValueError(f"only {len(base)} baseline years, cannot fit a Weibull level")
+    thr = weibull_threshold(base.values, rp)
+    if np.isnan(thr):
+        raise ValueError(f"return period {rp} exceeds the {len(base)}-year baseline")
+    return {int(y) for y, v in pk.items() if v >= thr}, thr, len(base)
 
 
-def grrr_flags(release: str) -> dict[str, set[int]]:
+def rate(years: set[int], baseline: tuple[int, int]) -> tuple[int, int]:
+    n = sum(1 for y in range(baseline[0], baseline[1] + 1) if y in years)
+    return n, baseline[1] - baseline[0] + 1
+
+
+def model_flags(release: str, baselines: dict[str, tuple[int, int]]) -> dict[str, set[int]]:
     out = {}
-    # Nigeria: >= 6 of 10 gauges over their own 4-yr level on the same day, Aug-Nov
+    # Nigeria: per gauge, Weibull 4-yr on Aug-Nov maxima over the baseline; >= 6 of 10 the same day
     daily = pd.DataFrame({g: reanalysis(release, g) for g in NGA_GAUGES})
-    over = pd.DataFrame({g: daily[g] >= rp_at(release, g, 4.0) for g in NGA_GAUGES})
-    cnt = over.sum(axis=1)
+    b = baselines["Nigeria 2026"]
+    over = {}
+    for g in NGA_GAUGES:
+        _, thr, _ = weibull_flags(daily[g], [8, 9, 10, 11], 4.0, b)
+        over[g] = daily[g] >= thr
+    cnt = pd.DataFrame(over).sum(axis=1)
     cnt = cnt[cnt.index.month.isin([8, 9, 10, 11])]
     out["Nigeria 2026"] = {int(y) for y, v in cnt.groupby(cnt.index.year).max().items() if v >= 6}
-    # Somalia: reference gauges Luuq (Juba) and Belet Weyne (Shabelle), either season, RP5
+    # Somalia: reference gauges, either season, Weibull RP5 per season over the baseline
     yrs = set()
     for st in ["luuq", "belet_weyne"]:
-        hid = SOM_GAUGES[st][2]
-        q = reanalysis(release, hid)
-        thr = rp_at(release, hid, 5.0)
+        q = reanalysis(release, SOM_GAUGES[st][2])
         for months in ([3, 4, 5], [10, 11, 12]):
-            yrs |= season_peak_years(q, months, thr)
+            f, _, _ = weibull_flags(q, months, 5.0, baselines["Somalia"])
+            yrs |= f
     out["Somalia"] = yrs
     for fw, hid in STATION.items():
         q = reanalysis(release, hid)
-        out[fw] = season_peak_years(q, FRAMEWORKS[fw]["season"], rp_at(release, hid, RP_LEVEL[fw]))
+        out[fw], _, _ = weibull_flags(q, FRAMEWORKS[fw]["season"], RP_LEVEL[fw], baselines[fw])
     return out
 
 
-def observed_flags() -> dict[str, set[int]]:
+def observed_series() -> dict[str, tuple[pd.Series, list[int] | None]]:
+    """The observed record per framework as a daily series, with the season months to use."""
     out = {}
-    # Chad: DRE 4-yr level on annual peaks (same rule as rescore_tcd)
-    dre = load_dre_tp()
-    pk = dre.groupby(dre.index.year).max()
-    out["Chad 2025"] = {int(y) for y, v in pk.items() if v >= pk.quantile(0.75)}
-    # Nigeria: GRDC Yidere Bode 3-yr wet-season years from the re-score output
-    g = pd.read_csv("outputs/rescore_nga_2026.csv")
-    row = g[g.station == "Yidere Bode"].iloc[0]
-    out["Nigeria 2026"] = {int(y) for y in str(row.obs_years_3yr).split(",") if y}
-    # Somalia: post-2000 RP3 episodes at the reference gauges, year of episode start
-    yrs = set()
-    for st in ["luuq", "belet_weyne"]:
-        lv = load_level(SOM_GAUGES[st][1])
-        am = lv[lv.index.year >= 2000].groupby(lv[lv.index.year >= 2000].index.year).max()
-        thr = weibull_threshold(am.values, 3)
-        for s, _e in episodes(lv >= thr):
-            yrs.add(int(s.year))
-    out["Somalia"] = yrs
-    # Nepal: DHM danger-level crossings at Chatara
+    out["Chad 2025"] = (load_dre_tp(), [8, 9, 10, 11])
+    import tempfile
+
+    import ocha_stratus as stratus
+    import xarray as xr
+
+    cc = stratus.get_container_client("projects", stage="dev")
+    raw = cc.get_blob_client("ds-aa-nga-flooding/raw/grdc/GRDC-Daily.nc").download_blob().readall()
+    with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
+        tmp.write(raw)
+    ds = xr.open_dataset(tmp.name)
+    g = ds["runoff_mean"].sel(id=1834110).to_series()  # Yidere Bode
+    g = g.where(g > -900).dropna()
+    g.index = pd.to_datetime(g.index).normalize()
+    out["Nigeria 2026"] = (g, [7, 8, 9, 10, 11])
     dhm = (
         pd.read_csv(
             Path(os.environ["AA_DATA_DIR"])
@@ -149,15 +171,45 @@ def observed_flags() -> dict[str, set[int]]:
         .set_index("date")["Chatara"]
         .dropna()
     )
-    cross = (dhm > 7.0).astype(int).diff() == 1
-    out["Nepal 2025 (Chatara)"] = {int(y) for y in dhm[cross].index.year}
-    # Bangladesh: FFWC severe floods
+    out["Nepal 2025 (Chatara)"] = (dhm, [6, 7, 8, 9])
+    return out
+
+
+def observed_flags(baselines: dict[str, tuple[int, int]]) -> dict[str, set[int]]:
+    out = {}
+    obs = observed_series()
+    for fw, (s, months) in obs.items():
+        out[fw], _, _ = weibull_flags(s, months, RP_LEVEL[fw], baselines[fw])
+    # Somalia: reference gauge levels, Weibull RP5 per season on the same baseline
+    yrs = set()
+    for st in ["luuq", "belet_weyne"]:
+        lv = load_level(SOM_GAUGES[st][1])
+        for months in ([3, 4, 5], [10, 11, 12]):
+            f, _, _ = weibull_flags(lv, months, 5.0, baselines["Somalia"])
+            yrs |= f
+    out["Somalia"] = yrs
     out["Bangladesh 2025 (Bahadurabad)"] = {
         int(d.year) for d in observed_events(load_ffwc_bahadurabad())
     }
-    # Niger: the trigger is the gauge; the observed record is the published threshold years
     out["Niger 2025"] = set(FRAMEWORKS["Niger 2025"]["fired"])
     return out
+
+
+def baselines_from_records() -> dict[str, tuple[int, int]]:
+    """1998-2023, cut to the years each observed record covers with a full season."""
+    b = {}
+    obs = observed_series()
+    for fw, (s, months) in obs.items():
+        pk = seasonal_max(s, months)
+        yrs = [int(y) for y in pk.index if BASELINE[0] <= y <= BASELINE[1]]
+        b[fw] = (min(yrs), max(yrs))
+    lv = load_level(SOM_GAUGES["luuq"][1])
+    pk = seasonal_max(lv, [3, 4, 5])
+    yrs = [int(y) for y in pk.index if BASELINE[0] <= y <= BASELINE[1]]
+    b["Somalia"] = (min(yrs), max(yrs))
+    b["Bangladesh 2025 (Bahadurabad)"] = BASELINE
+    b["Niger 2025"] = BASELINE
+    return b
 
 
 def emdat_affected(iso3: str) -> dict[int, float]:
@@ -168,22 +220,58 @@ def emdat_affected(iso3: str) -> dict[int, float]:
     )
 
 
-def cerf_flood(iso3: str) -> dict[int, float]:
-    f = Path(os.environ["AA_DATA_DIR"]) / "public/raw/glb/cerf/CERF Allocations.csv"
-    df = pd.read_csv(f, encoding="latin-1")
-    sub = df[
-        (df.countryCode == iso3)
-        & (df.emergencyTypeName == "Flood")
-        & (df.windowFullName == "Rapid Response")
-    ]
-    return sub.groupby("year")["totalAmountApproved"].sum().astype(float).to_dict()
+def cerf_flood(iso3: str) -> tuple[dict[int, float], dict[int, float]]:
+    """CERF flood allocations by year: (rapid response, anticipatory action).
+
+    From the team's OneGMS mirror `aa.cerf_allocation` in the dev database, read through the
+    Databricks SSH tunnel on 4 Nov 2026 into outputs/cerf_flood_allocations_dev.csv (window,
+    emergency type Flood, `aa_keyword` marks the anticipatory allocations). Re-read with:
+        DSCI_AZ_DB_DEV_HOST=127.0.0.1:15432 after `db-tunnel up` (internal KB, local-db-access).
+    """
+    f = Path("outputs/cerf_flood_allocations_dev.csv")
+    if not f.exists():
+        raise FileNotFoundError(
+            "outputs/cerf_flood_allocations_dev.csv missing: read aa.cerf_allocation through the tunnel first"
+        )
+    df = pd.read_csv(f)
+    sub = df[df.country_iso3 == iso3]
+    rr = (
+        sub[(sub.window_name == "Rapid Response") & (~sub.aa_keyword.astype(bool))]
+        .groupby("year")["usd"]
+        .sum()
+    )
+    aa = sub[sub.aa_keyword.astype(bool)].groupby("year")["usd"].sum()
+    return rr.astype(float).to_dict(), aa.astype(float).to_dict()
 
 
 def main() -> int:
-    g23, g26, obs = grrr_flags("2023"), grrr_flags("2026"), observed_flags()
-    rows = []
+    baselines = baselines_from_records()
+    print("baselines:", baselines)
+    g23, g26, obs = (
+        model_flags("2023", baselines),
+        model_flags("2026", baselines),
+        observed_flags(baselines),
+    )
+    rows, hdr = [], []
     for fw, cfg in FRAMEWORKS.items():
-        em, cf = emdat_affected(cfg["iso3"]), cerf_flood(cfg["iso3"])
+        em = emdat_affected(cfg["iso3"])
+        cf, ca = cerf_flood(cfg["iso3"])
+        b = baselines[fw]
+        b23 = (b[0], min(b[1], 2023))
+        hdr.append(
+            {
+                "framework": fw,
+                "baseline_start": b[0],
+                "baseline_end": b[1],
+                "rp": RP_LEVEL[fw],
+                "fired_n": rate(set(cfg["fired"]), b)[0] if cfg["fired"] else np.nan,
+                "grrr_2023_n": rate(g23[fw], b23)[0],
+                "grrr_2023_years": b23[1] - b23[0] + 1,
+                "grrr_2026_n": rate(g26[fw], b)[0],
+                "observed_n": rate(obs[fw], b)[0],
+                "baseline_years": b[1] - b[0] + 1,
+            }
+        )
         for y in YEARS:
             rows.append(
                 {
@@ -193,14 +281,20 @@ def main() -> int:
                     "framework_fired": int(y in cfg["fired"]) if cfg["fired"] else np.nan,
                     "grrr_2023": int(y in g23[fw]) if y <= 2023 else np.nan,
                     "grrr_2026": int(y in g26[fw]),
-                    "observed": int(y in obs[fw]),
+                    "observed": int(y in obs[fw])
+                    if (fw != "Nepal 2025 (Chatara)" or y <= 2012)
+                    else np.nan,
                     "emdat_affected": em.get(y, np.nan),
-                    "cerf_flood_usd": cf.get(y, np.nan) if 2006 <= y <= 2021 else np.nan,
+                    "cerf_flood_usd": cf.get(y, np.nan) if y >= 2006 else np.nan,
+                    "cerf_aa_usd": ca.get(y, np.nan) if y >= 2020 else np.nan,
                 }
             )
     df = pd.DataFrame(rows)
     Path("outputs").mkdir(exist_ok=True)
     df.to_csv("outputs/year_ledger.csv", index=False)
+    pd.DataFrame(hdr).to_csv("outputs/year_ledger_rates.csv", index=False)
+    for h in hdr:
+        print(h)
     for fw in FRAMEWORKS:
         d = df[df.framework == fw]
         print(
