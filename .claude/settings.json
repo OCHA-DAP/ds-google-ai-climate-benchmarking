@@ -1,0 +1,16 @@
+{
+  "extraKnownMarketplaces": {
+    "ds-team": {
+      "source": {
+        "source": "github",
+        "repo": "OCHA-DAP/ds-knowledge-base"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "kb-access@ds-team": true,
+    "data-access@ds-team": true,
+    "data-conventions@ds-team": true,
+    "aa-methods@ds-team": true
+  }
+}
