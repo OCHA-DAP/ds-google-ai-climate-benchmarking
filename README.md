@@ -41,6 +41,10 @@ about Google's November 2026 data release.
 | `scripts/stations.py` | The trigger stations of the flood frameworks, one entry per station and season, with the Flood Hub id or coordinates each framework uses |
 | `scripts/map_stations.py` | Map each station to a sub-basin of the release: identity for Flood Hub ids (they share the HydroBASINS numbering), largest river within 10 km for real gauges, flagged for a human check |
 | `scripts/proxy_check.py` | Is the reanalysis a proxy for the reforecast? Per station and lead 1 to 10: daily and seasonal-peak Spearman, bootstrap interval, reforecast-to-reanalysis ratio above the 2-yr level. Results in `docs/proxy-check-2026-11.md` |
+| `scripts/grrr_releases.py` | One loader for both public releases (2023 bucket, November 2026), so a re-score runs the same code on each |
+| `scripts/rescore_som.py` | Somalia: GRRR reanalysis against the SWALIM gauges, best-lag daily Spearman and RP3 episode POD/FAR, reproducing `ds-aa-som-floods` notebooks 02 and 06 |
+| `scripts/rescore_npl.py` | Nepal: model exceedance events against DHM danger-level crossings at RP2 and RP5, reproducing `ds-aa-npl-flooding` book chapter 05, GloFAS v4 included |
+| `scripts/rescore_nga.py` | Nigeria: GRRR reanalysis against GRDC observed discharge, daily and annual-peak Spearman and 3/5-yr exceedance F1, reproducing `ds-aa-nga-flooding` notebook 08. Results of all three in `docs/rescore-2026-11.md` |
 
 ## Running
 
@@ -50,6 +54,9 @@ uv run scripts/grrr_2026_11.py subhybas_1121902040          # one basin, prints 
 uv run scripts/check_grrr_coverage.py --iso NGA SOM NPL     # coverage for named countries, writes outputs/
 uv run scripts/map_stations.py                              # outputs/stations_mapped.csv
 uv run scripts/proxy_check.py                               # outputs/proxy_check.csv, needs the mapping first
+uv run scripts/rescore_npl.py --release 2026                # also 2023; needs AA_DATA_DIR
+uv run scripts/rescore_som.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
+uv run scripts/rescore_nga.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
 ```
 
 The Google data is public (CC-BY-4.0) and read anonymously from
