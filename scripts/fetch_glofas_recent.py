@@ -15,8 +15,10 @@ Bahadurabad from the Bangladesh spoke config (v4). Each request is a small box a
 (0.3 degrees), one per station and year; the nearest grid cell is taken.
 
 Needs a Copernicus key in ~/.cdsapirc (the EWDS endpoint accepts the CDS key). Requests queue
-on the EWDS side; a year typically takes a few minutes. Raw boxes are kept under
-outputs/glofas_recent/ so a rerun only fetches what is missing.
+on the EWDS side for hours, so all requests are submitted first and then polled together; the
+request ids are kept in outputs/glofas_recent/jobs.json and a rerun resumes from them. Raw boxes
+are kept under outputs/glofas_recent/ so a rerun only fetches what is missing. A request the
+store rejects (a year or version it does not serve) is reported and left out, not retried.
 
 Usage:
     uv run scripts/fetch_glofas_recent.py                 # all missing years to the current year
@@ -27,11 +29,14 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import sys
+import time
 from pathlib import Path
 
 import cdsapi
 import pandas as pd
+import requests
 import xarray as xr
 
 EWDS_URL = "https://ewds.climate.copernicus.eu/api"
@@ -60,18 +65,19 @@ POINTS = {
 BOX = 0.15  # half-width of the request box in degrees
 
 
+JOBS = RAW / "jobs.json"
+
+
 def _client() -> cdsapi.Client:
     rc = Path.home() / ".cdsapirc"
     if not rc.exists():
         raise FileNotFoundError("~/.cdsapirc missing: a Copernicus key is needed for EWDS")
     lines = dict(line.strip().split(": ", 1) for line in rc.read_text().splitlines() if ":" in line)
-    return cdsapi.Client(url=EWDS_URL, key=lines["key"], wait_until_complete=True, quiet=True)
+    return cdsapi.Client(url=EWDS_URL, key=lines["key"], wait_until_complete=False, quiet=True)
 
 
-def fetch_box(client, version: str, year: int, lat: float, lon: float, target: Path) -> Path:
-    if target.exists():
-        return target
-    query = {
+def query_for(version: str, year: int, lat: float, lon: float) -> dict:
+    return {
         "system_version": version,
         "hydrological_model": "lisflood",
         "product_type": "consolidated",
@@ -84,9 +90,76 @@ def fetch_box(client, version: str, year: int, lat: float, lon: float, target: P
         "download_format": "unarchived",
         "area": [lat + BOX, lon - BOX, lat - BOX, lon + BOX],
     }
-    target.parent.mkdir(parents=True, exist_ok=True)
-    client.retrieve("cems-glofas-historical", query, str(target))
-    return target
+
+
+def submit_all(client, wanted: list[tuple[str, str, str, int, float, float, Path]]) -> dict:
+    """Submit every missing request; returns {target name: request id}, persisted to JOBS."""
+    RAW.mkdir(parents=True, exist_ok=True)
+    jobs = json.loads(JOBS.read_text()) if JOBS.exists() else {}
+    for fw, st, version, year, lat, lon, target in wanted:
+        if target.exists() or target.name in jobs:
+            continue
+        try:
+            res = client.retrieve("cems-glofas-historical", query_for(version, year, lat, lon))
+            jobs[target.name] = res.request_id
+            print(f"submitted {fw} {st} {version} {year}: {res.request_id}", flush=True)
+        except Exception as e:  # noqa: BLE001 - cdsapi raises a bare Exception on a 4xx
+            print(
+                f"{fw} {st} {version} {year}: REJECTED at submission: {type(e).__name__}: {str(e)[:200]}",
+                file=sys.stderr,
+                flush=True,
+            )
+            jobs[target.name] = f"rejected: {type(e).__name__}"
+        JOBS.write_text(json.dumps(jobs, indent=1))
+    return jobs
+
+
+def _headers() -> dict:
+    rc = Path.home() / ".cdsapirc"
+    lines = dict(line.strip().split(": ", 1) for line in rc.read_text().splitlines() if ":" in line)
+    return {"PRIVATE-TOKEN": lines["key"]}
+
+
+def poll_and_download(jobs: dict, poll_s: int = 300) -> dict:
+    """Poll the submitted requests on the EWDS jobs API until each is downloaded or failed."""
+    outcome = {}
+    pending = {}
+    for n, rid in jobs.items():
+        if rid.startswith("rejected"):
+            outcome[n] = rid
+        elif (RAW / n).exists():
+            outcome[n] = "downloaded"
+        else:
+            pending[n] = rid
+    while pending:
+        for n, rid in list(pending.items()):
+            r = requests.get(f"{EWDS_URL}/retrieve/v1/jobs/{rid}", headers=_headers(), timeout=60)
+            if r.status_code != 200:
+                print(f"{n}: status query {r.status_code}", file=sys.stderr, flush=True)
+                continue
+            status = r.json().get("status")
+            if status == "successful":
+                res = requests.get(
+                    f"{EWDS_URL}/retrieve/v1/jobs/{rid}/results", headers=_headers(), timeout=60
+                )
+                res.raise_for_status()
+                href = res.json()["asset"]["value"]["href"]
+                with requests.get(href, stream=True, timeout=600) as dl:
+                    dl.raise_for_status()
+                    with open(RAW / n, "wb") as f:
+                        f.writelines(dl.iter_content(1 << 20))
+                outcome[n] = "downloaded"
+                print(f"downloaded {n}", flush=True)
+                del pending[n]
+            elif status in ("failed", "dismissed", "rejected"):
+                detail = str(r.json().get("metadata", {}))[:200]
+                outcome[n] = f"{status}: {detail}"
+                print(f"{n}: {outcome[n]}", file=sys.stderr, flush=True)
+                del pending[n]
+        if pending:
+            print(f"{len(pending)} pending at {dt.datetime.now(dt.UTC):%H:%MZ}", flush=True)
+            time.sleep(poll_s)
+    return outcome
 
 
 def cell_series(path: Path, lat: float, lon: float) -> pd.Series:
@@ -116,36 +189,42 @@ def main(argv=None) -> int:
     a = p.parse_args(argv)
     client = _client()
     this_year = dt.date.today().year
-    frames = []
+    wanted = []
     for fw in a.frameworks:
         version, first, stations = POINTS[fw]
         years = a.years or list(range(first, this_year + 1))
         for st, (lat, lon) in stations.items():
             for y in years:
-                target = RAW / f"{fw.split()[0].lower()}_{st}_{version}_{y}.nc"
-                try:
-                    fetch_box(client, version, y, lat, lon, target)
-                except Exception as e:  # the EWDS error says whether the year is not yet served
-                    print(
-                        f"{fw} {st} {version} {y}: FAILED: {type(e).__name__}: {str(e)[:200]}",
-                        file=sys.stderr,
-                    )
-                    raise
-                s = cell_series(target, lat, lon)
-                print(
-                    f"{fw} {st} {version} {y}: {s.index.min().date()} to {s.index.max().date()}, {len(s)} days"
-                )
-                frames.append(
-                    pd.DataFrame(
-                        {
-                            "framework": fw,
-                            "station": st,
-                            "version": version,
-                            "date": s.index,
-                            "q": s.values,
-                        }
+                wanted.append(
+                    (
+                        fw,
+                        st,
+                        version,
+                        y,
+                        lat,
+                        lon,
+                        RAW / f"{fw.split()[0].lower()}_{st}_{version}_{y}.nc",
                     )
                 )
+    jobs = submit_all(client, wanted)
+    outcome = poll_and_download(jobs)
+    frames = []
+    for fw, st, version, y, lat, lon, target in wanted:
+        if outcome.get(target.name) != "downloaded":
+            print(
+                f"{fw} {st} {version} {y}: not fetched ({outcome.get(target.name)})",
+                file=sys.stderr,
+            )
+            continue
+        s = cell_series(target, lat, lon)
+        print(
+            f"{fw} {st} {version} {y}: {s.index.min().date()} to {s.index.max().date()}, {len(s)} days"
+        )
+        frames.append(
+            pd.DataFrame(
+                {"framework": fw, "station": st, "version": version, "date": s.index, "q": s.values}
+            )
+        )
     if not frames:
         raise SystemExit("nothing fetched")
     new = pd.concat(frames, ignore_index=True)
