@@ -20,8 +20,11 @@ response, year by year"), built for every framework with a Google-evaluable stat
   Each column header carries fires / baseline years, the empirical return period.
 - emdat_affected: EM-DAT total affected by floods in the country that year (team blob mirror;
   check its vintage);
-- cerf_flood_usd: CERF rapid-response flood allocations for the country that year, and
-  cerf_aa_usd the anticipatory ones, from the team's OneGMS mirror (dev database, via the tunnel).
+- cerf_flood_usd: CERF rapid-response flood allocations for the country that year,
+  cerf_aa_usd the anticipatory ones, cerf_total_usd the two combined (the figure shows the
+  total), from the team's OneGMS mirror (dev database, via the tunnel).
+- year_ledger_impact_corr.csv: per flag column, Spearman against EM-DAT affected and against
+  the CERF total, and phi against whether any CERF flood allocation was made (2006 on).
 
 Writes outputs/year_ledger.csv. Needs blob and AA_DATA_DIR access.
 """
@@ -310,17 +313,17 @@ def cerf_flood(iso3: str) -> tuple[dict[int, float], dict[int, float]]:
 FLAG_COLS = ["framework_fired", "incumbent", "grrr_2026", "observed", "grrr_2023"]
 IMPACT = [  # (impact column, first year the source covers, statistic)
     ("emdat_affected", 1998, "spearman"),
-    ("cerf_flood_usd", 2006, "spearman"),
-    ("cerf_aa_usd", 2020, "phi"),
+    ("cerf_total_usd", 2006, "spearman"),
+    ("cerf_total_usd", 2006, "phi"),
 ]
 
 
 def impact_correlations(df: pd.DataFrame) -> pd.DataFrame:
     """Per framework and flag column, how the yearly flags line up with the impact and response columns.
 
-    Spearman rank correlation of the 0/1 flag against the amount (people affected, CERF rapid
-    response US$), phi (Pearson on two 0/1 series) against whether a CERF anticipatory allocation
-    was made. Years a source covers but has no record for count as zero; years the flag column
+    Spearman rank correlation of the 0/1 flag against the amount (people affected, CERF flood
+    US$ with rapid response and anticipatory combined), and phi (Pearson on two 0/1 series)
+    against whether any CERF flood allocation was made that year. Years a source covers but has no record for count as zero; years the flag column
     lacks are dropped. n is written next to every value; constant series give NaN.
     """
     rows = []
@@ -401,6 +404,9 @@ def main() -> int:
                     "emdat_affected": em.get(y, np.nan),
                     "cerf_flood_usd": cf.get(y, np.nan) if y >= 2006 else np.nan,
                     "cerf_aa_usd": ca.get(y, np.nan) if y >= 2020 else np.nan,
+                    "cerf_total_usd": (cf.get(y, 0.0) + ca.get(y, 0.0))
+                    if (y >= 2006 and (y in cf or y in ca))
+                    else np.nan,
                 }
             )
     df = pd.DataFrame(rows)
@@ -409,7 +415,11 @@ def main() -> int:
     pd.DataFrame(hdr).to_csv("outputs/year_ledger_rates.csv", index=False)
     corr = impact_correlations(df)
     corr.to_csv("outputs/year_ledger_impact_corr.csv", index=False)
-    print(corr.pivot_table(index=["framework", "impact"], columns="column", values="r").round(2))
+    print(
+        corr.pivot_table(index=["framework", "impact", "stat"], columns="column", values="r").round(
+            2
+        )
+    )
     for h in hdr:
         print(h)
     for fw in FRAMEWORKS:
