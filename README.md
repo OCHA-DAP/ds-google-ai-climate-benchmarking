@@ -48,7 +48,7 @@ about Google's November 2026 data release.
 | `scripts/rescore_tcd.py` | Chad: model annual peaks at N'Djamena against the DRE observed level, 4-yr exceedance years, peak correlation and days early, reproducing the 2025 document's annex; GloFAS v4 included |
 | `scripts/rescore_bgd.py` | Bangladesh: GRRR and GloFAS v4 reanalysis events above RP5 against FFWC severe floods (danger level + 0.85 m for 3 days) at Bahadurabad |
 | `scripts/incumbents.py` | The model each framework actually ran on, as daily reanalysis series: GloFAS v4 at Bahadurabad, Chatara/Chisapani and N'Djamena, GloFAS v5 at the Somali gauges; labels and trigger-source lines per framework |
-| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, the model it ran on, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF rapid-response flood allocations. `outputs/year_ledger.csv` |
+| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, the model it ran on, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF flood allocations, plus each column's correlation with them. `outputs/year_ledger.csv`, `year_ledger_rates.csv`, `year_ledger_impact_corr.csv` |
 
 ## Running
 

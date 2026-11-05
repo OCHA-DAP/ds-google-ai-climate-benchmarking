@@ -35,6 +35,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from ocha_stratus import emdat
+from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent))
 from grrr_releases import reanalysis, weibull_threshold
@@ -306,6 +307,50 @@ def cerf_flood(iso3: str) -> tuple[dict[int, float], dict[int, float]]:
     return rr.astype(float).to_dict(), aa.astype(float).to_dict()
 
 
+FLAG_COLS = ["framework_fired", "incumbent", "grrr_2026", "observed", "grrr_2023"]
+IMPACT = [  # (impact column, first year the source covers, statistic)
+    ("emdat_affected", 1998, "spearman"),
+    ("cerf_flood_usd", 2006, "spearman"),
+    ("cerf_aa_usd", 2020, "phi"),
+]
+
+
+def impact_correlations(df: pd.DataFrame) -> pd.DataFrame:
+    """Per framework and flag column, how the yearly flags line up with the impact and response columns.
+
+    Spearman rank correlation of the 0/1 flag against the amount (people affected, CERF rapid
+    response US$), phi (Pearson on two 0/1 series) against whether a CERF anticipatory allocation
+    was made. Years a source covers but has no record for count as zero; years the flag column
+    lacks are dropped. n is written next to every value; constant series give NaN.
+    """
+    rows = []
+    for fw, d in df.groupby("framework", sort=False):
+        for col in FLAG_COLS:
+            for imp, start, stat in IMPACT:
+                sub = d[(d.year >= start) & d[col].notna()]
+                x = sub[col].astype(float)
+                y = sub[imp].fillna(0.0).astype(float)
+                if stat == "phi":
+                    y = (y > 0).astype(float)
+                if len(sub) < 3 or x.nunique() < 2 or y.nunique() < 2:
+                    r = np.nan
+                elif stat == "spearman":
+                    r = float(stats.spearmanr(x, y)[0])
+                else:
+                    r = float(np.corrcoef(x, y)[0, 1])
+                rows.append(
+                    {
+                        "framework": fw,
+                        "column": col,
+                        "impact": imp,
+                        "stat": stat,
+                        "r": r,
+                        "n": len(sub),
+                    }
+                )
+    return pd.DataFrame(rows)
+
+
 def main() -> int:
     baselines = baselines_from_records()
     print("baselines:", baselines)
@@ -362,6 +407,9 @@ def main() -> int:
     Path("outputs").mkdir(exist_ok=True)
     df.to_csv("outputs/year_ledger.csv", index=False)
     pd.DataFrame(hdr).to_csv("outputs/year_ledger_rates.csv", index=False)
+    corr = impact_correlations(df)
+    corr.to_csv("outputs/year_ledger_impact_corr.csv", index=False)
+    print(corr.pivot_table(index=["framework", "impact"], columns="column", values="r").round(2))
     for h in hdr:
         print(h)
     for fw in FRAMEWORKS:
