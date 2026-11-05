@@ -1,6 +1,6 @@
-# Re-scoring the frameworks' own evaluations on the November 2026 release, 4 Nov 2026
+# Re-scoring the frameworks' own evaluations on the November 2026 release, 4–5 Nov 2026
 
-Step 2 of the replication plan, five frameworks. Each script runs the same code on the 2023 bucket (`model_id_8583a5c2_v0`) and on the November 2026 release (`distributed_model_2026_11`), so every table has three columns: the number the team published, this code on the 2023 bucket, this code on the 2026 release. Where column two matches column one the method is reproduced and column three is a like-for-like comparison. Scripts: `scripts/rescore_som.py`, `scripts/rescore_npl.py`, `scripts/rescore_nga.py`, shared loader `scripts/grrr_releases.py`; raw results `outputs/rescore_*.csv`.
+Step 2 of the replication plan, five frameworks. The comparison that matters is GRRR November 2026 against the model each framework actually ran on, the incumbent (`scripts/incumbents.py`): the GRRR 2023 bucket (`model_id_8583a5c2_v0`) for Nigeria 2026 and one leg of the Somalia proposal; GloFAS v4 for Chad, Nepal and Bangladesh; GloFAS v5 as the Somalia proposal's other leg; the ABN gauge alone for Niger. Each script runs the same code on every model from its own reanalysis, so every table reads: the number the team published, the incumbent through this code, the 2023 bucket, the 2026 release (`distributed_model_2026_11`). Where the reproduction matches the published number the method is right and the rest is like-for-like. The GloFAS side carries the same reanalysis-as-proxy caveat as the Google side: the Somalia spoke found GloFAS v4 drifting to about 0.9 of its reanalysis by lead 12, and no GloFAS v5 reforecast exists to test. Scripts: `scripts/rescore_{som,npl,nga,tcd,bgd}.py`, loaders `scripts/grrr_releases.py` and `scripts/incumbents.py`; raw results `outputs/rescore_*.csv`.
 
 ## Somalia: GRRR reanalysis against the SWALIM gauges
 
@@ -38,6 +38,22 @@ Reproduces the station-skill layer of `ds-aa-som-floods` (notebooks 02 and 06): 
 | Jowhar | 10 | 10 / 10 / 10 | 0.20 / 0.20 / 0.20 | 0.80 / 0.80 / 0.80 | 348 / 501 |
 
 **Reading.** The 2023 column reproduces the published daily ρ to two decimals at 12 of 14 station-seasons (Dollow differs by 0.02 and in lag; its record starts in 2015) and the published episode POD and FAR at all seven gauges. On the 2026 release the daily correlation against the reference gauge rises everywhere, most in Deyr (Juba 0.46–0.59 → 0.86–0.91; Shabelle 0.62–0.64 → 0.87–0.88), and the best lag moves from the model leading the river by 2–6 days in Gu to lagging it by 2–10 days, so the new model tracks the gauge more closely but later. Episode detection at RP3 improves at Bardheere (POD 0.50 → 1.00), Bualle (0.43 → 0.71), Belet Weyne (0.50 → 0.70) and Luuq (0.44 → 0.56) with FAR unchanged or lower, except Dollow where the model fires more often (FAR 0.40 → 0.62). Jowhar stays poor on both (POD 0.20), as it was. The seasonal-peak correlation against each gauge's own record is the one statistic that does not improve uniformly (Dollow Deyr 0.76 → 0.34), on 22 seasons. Bardheere's gauge is right-censored at bank-full and has a magnet value at 9.00 m, so its ranks carry ties.
+
+### The proposal's GloFAS v5 leg through the same code (`--release glofas_v5`)
+
+GloFAS v5 reanalysis per station from the spoke's blob (1999–2023), no shipped return periods so `derived` only. Columns: GloFAS v5 / 2023 bucket / 2026 release.
+
+| Station | Gu ρ (lag) | Deyr ρ (lag) | gauge episodes | POD at RP3 | FAR at RP3 |
+|---|---|---|---|---|---|
+| dollow | 0.83 (-1) / 0.87 (0) / 0.89 (-2) | 0.87 (5) / 0.59 (-5) / 0.90 (1) | 3 | 0.33 / 1.00 / 1.00 | 0.67 / 0.40 / 0.62 |
+| luuq | 0.85 (0) / 0.87 (0) / 0.89 (-3) | 0.85 (3) / 0.58 (-5) / 0.89 (0) | 9 | 0.44 / 0.44 / 0.56 | 0.50 / 0.50 / 0.55 |
+| bardheere | 0.83 (-2) / 0.87 (0) / 0.87 (-7) | 0.80 (0) / 0.50 (-10) / 0.87 (-3) | 4 | 0.50 / 0.50 / 1.00 | 0.75 / 0.71 / 0.64 |
+| bualle | 0.80 (-7) / 0.86 (-1) / 0.86 (-10) | 0.79 (-2) / 0.46 (-10) / 0.85 (-5) | 7 | 0.29 / 0.43 / 0.71 | 0.67 / 0.50 / 0.44 |
+| belet_weyne | 0.78 (-3) / 0.81 (6) / 0.89 (-2) | 0.83 (4) / 0.63 (4) / 0.88 (3) | 10 | 0.60 / 0.50 / 0.70 | 0.14 / 0.38 / 0.36 |
+| bulo_burti | 0.75 (-7) / 0.78 (4) / 0.88 (-4) | 0.82 (2) / 0.62 (2) / 0.87 (1) | 9 | 0.44 / 0.44 / 0.44 | 0.43 / 0.50 / 0.60 |
+| jowhar | 0.69 (-10) / 0.78 (4) / 0.87 (-6) | 0.81 (0) / 0.62 (2) / 0.86 (-1) | 10 | 0.20 / 0.20 / 0.20 | 0.71 / 0.80 / 0.80 |
+
+**Reading.** Against GloFAS v5, GRRR 2026 tracks every gauge more closely in both seasons (0.85–0.90 against 0.69–0.87) and catches as many or more RP3 episodes at every gauge, clearly more at Dollow, Bardheere, Bualle and Belet Weyne; FAR is lower at Bardheere and Bualle, higher at Belet Weyne and Bulo Burti. Jowhar is poor for all three.
 
 ## Nepal: model exceedance events against DHM danger-level crossings
 
@@ -90,11 +106,11 @@ Reproduces `pa-aa-tcd-flooding/exploration/dre_glofas.md` and the 2025 document'
 | GRRR, 2023 bucket | 18 | 2010,2012,2019,2020,2022 | 2010,2012,2019,2020,2022 | 5 | none | none | 0.83 | 20 |
 | GRRR, November 2026 release | 18 | 2010,2012,2019,2020,2022 | 2012,2018,2019,2020,2022 | 4 | 2010 | 2018 | 0.74 | 31 |
 
-**Reading.** GloFAS through this code gives the document's numbers exactly. The 2023 bucket's GRRR flags the same five years as the gauge with no miss and no false alarm, peak ρ 0.83, 20 days early. The November 2026 release misses 2010 and adds 2018, peak ρ 0.74, and its peak comes 31 days early, like GloFAS. At N'Djamena the new model is worse than the old on the framework's own test, on 18 years and five flood years.
+**Reading.** The framework runs on GloFAS v4, and GloFAS through this code gives the document's numbers exactly. Against it, the November 2026 release flags 4 of 5 (catches 2019 and 2020, misses 2010, adds 2018), peak ρ 0.74 against 0.69, and the same 31-day lead on the observed peak: better than the incumbent on years flagged, level on timing. The 2023 bucket was better still, the same five years as the gauge with no miss and no false alarm, ρ 0.83, 20 days early. Eighteen years and five flood years.
 
 ## Bangladesh: GRRR reanalysis events against FFWC severe floods at Bahadurabad
 
-Observed events from the FFWC record on the shared drive: water level at or above the danger level (19.5 m) plus 0.85 m for three consecutive days, as the framework defines a severe flood; seven events, 1988, 2012, 2016, 2017, 2019 and two in 2020 (the 1987–2019 file holds only days above the danger level, which is enough for this definition but not for annual peaks). Model events above RP5, collapsed with a 7-day gap, matched within ±7 days, 1987–2020. No published detection figure for this station is on the KB page. GloFAS v4 is not yet run here: its Bangladesh files are per-year grids that need the Bahadurabad point extracted. Basin `hybas_4121501030`, largest river within 10 km, 2-yr flow 69,700 m³/s, plausible for the Jamuna but unconfirmed.
+Observed events from the FFWC record on the shared drive: water level at or above the danger level (19.5 m) plus 0.85 m for three consecutive days, as the framework defines a severe flood; seven events, 1988, 2012, 2016, 2017, 2019 and two in 2020 (the 1987–2019 file holds only days above the danger level, which is enough for this definition but not for annual peaks). Model events above RP5, collapsed with a 7-day gap, matched within ±7 days, 1987–2020. No published detection figure for this station is on the KB page. The incumbent is GloFAS v4 at Bahadurabad (the framework was calibrated on v3.1 and runs on v4), from the spoke's station-extracted yearly files on the shared drive (1979–2022), scored the same way at the quantile 1 − 1/5 of its own annual maxima. Basin `hybas_4121501030`, largest river within 10 km, 2-yr flow 69,700 m³/s, plausible for the Jamuna but unconfirmed.
 
 | Release | RP5 convention | threshold m³/s | observed events | model events | matched | misses | false alarms |
 |---|---|---|---|---|---|---|---|
@@ -102,17 +118,18 @@ Observed events from the FFWC record on the shared drive: water level at or abov
 | 2023 | quantile_full | 57,295 | 7 | 9 | 3 | 4 | 5 |
 | 2026 | shipped | 80,205 | 7 | 11 | 3 | 4 | 8 |
 | 2026 | quantile_full | 82,242 | 7 | 8 | 2 | 5 | 6 |
+| GloFAS v4 (ran on) | quantile_full | 97,393 | 7 | 9 | 3 | 4 | 6 |
 
-**Reading.** Three of seven severe floods matched on both releases with the shipped RP5; the new release produces more model events and more false alarms (8 against 6), and two of seven with the quantile threshold. Flat to slightly worse. The miss set is the same: 1988, 2016, 2017 and one of the 2020 pair. A reanalysis above RP5 is a crude stand-in for the framework's readiness trigger (≥50% of the GloFAS ensemble above RP5 at up to 15 days), so this is a station-skill reading, not a trigger one.
+**Reading.** GloFAS v4, which the framework runs on, matches 3 of 7 with 6 false alarms; the 2023 bucket the same 3 with 5 or 6; the 2026 release 3 of 7 with 8 false alarms at the shipped RP5, or 2 of 7 with 6 at the quantile. Nothing separates the three at this station. 1988 and 2012 go unmatched by all; the miss set for GRRR is 1988, 2016, 2017 and one of the 2020 pair. A reanalysis above RP5 is a crude stand-in for the framework's readiness trigger (≥50% of the GloFAS ensemble above RP5 at up to 15 days), so this is a station-skill reading, not a trigger one.
 
 ## Year by year
 
-`scripts/year_ledger.py` builds the table the frameworks use themselves: per framework and year, the framework's published backtest; then, on one rule, whether the 2023 bucket, the 2026 release and the observed record each reach the empirical Weibull level at the framework's return period fitted on the same baseline years (1998–2023, cut to the observed record's coverage); EM-DAT people affected by floods; and CERF flood allocations from the OneGMS mirror in the team database (read through the Databricks SSH tunnel, rapid response and anticipatory kept apart). Each column's flags over the baseline and the implied return period are written to `outputs/year_ledger_rates.csv` and printed in the figure headers, so the columns are comparable. Output: `outputs/year_ledger.csv`; figure on the working page.
+`scripts/year_ledger.py` builds the table the frameworks use themselves: per framework and year, the framework's published backtest; the model it ran on (the incumbent, scored from its own reanalysis); then, on one rule, whether the incumbent, the 2023 bucket, the 2026 release and the observed record each reach the empirical Weibull level at the framework's return period fitted on the same baseline years (1998–2023, cut to the observed record's coverage); EM-DAT people affected by floods; and CERF flood allocations from the OneGMS mirror in the team database (read through the Databricks SSH tunnel, rapid response and anticipatory kept apart). Each column's flags over the baseline and the implied return period are written to `outputs/year_ledger_rates.csv` and printed in the figure headers, so the columns are comparable; the rates file also carries each framework's trigger source line, shown under the panel title. On the incumbent column: Nigeria 6 of 26 (same six years on all three models); Somalia GloFAS v5 9 of 22 against GRRR 2026 7 and the gauges 10; Chad GloFAS v4 5 of 20 against 5 and the gauge's 4; Nepal 3 of 15 all round; Bangladesh 5 of 25 against 5. Output: `outputs/year_ledger.csv`; figure on the working page.
 
 ## What this says so far
 
 - The published station-skill numbers are reproducible from the public buckets and the team's gauge records, which is the precondition for any benchmark claim.
-- The new model tracks the Somali gauges more closely day to day and detects more of their RP3 episodes, at the cost of a later signal (lag) and more frequent firing at Dollow. In Nigeria and Nepal the picture is mixed or flat: better at some stations, worse at others, no change in the Chatara failure.
+- Against the models the frameworks actually run on: GRRR 2026 is better than GloFAS v5 at every Somali gauge (closer tracking, more episodes caught) and better than GloFAS v4 at N'Djamena on the annex test (4 of 5 against 3 of 5); level with GloFAS v4 at Chatara and Bahadurabad, where every model is poor. Against the 2023 bucket, the only incumbent that is Google's own, Nigeria is mixed, Somalia better in Deyr with a later signal, Chad worse (the 2023 bucket had 5 of 5).
 - None of this is a trigger-outcome result. Those need the frameworks' own thresholds refitted on the release (the magnitudes differ) and, for the forecast side, the ten-season reforecast rather than the reanalysis.
 
-Still to do in step 2: Uganda (the impact backtest is a pipeline with zones and catch windows; adding a GRRR leg means running it through that pipeline), the Niger new question, GloFAS for Bangladesh, and Chad's FloodScan province check; the five real-gauge basin mappings remain to be confirmed first.
+Still to do in step 2: Uganda (the impact backtest is a pipeline with zones and catch windows; adding a GRRR leg means running it through that pipeline), the Niger new question, Nigeria 2025's GloFAS leg at Wuroboki, and Chad's FloodScan province check; the five real-gauge basin mappings remain to be confirmed first.

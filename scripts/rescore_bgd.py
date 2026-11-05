@@ -14,10 +14,11 @@ keeps DL + 0.85 m). This script:
 - matches within +-7 days (hits, misses, false alarms), only over the years both records cover;
 - no annual-peak comparison: the 1987-2019 file holds only days above the danger level.
 
-No published detection number is carried on the KB page for this station, so the three-column
-comparison here is 2023 vs 2026 only. GloFAS v4 is not included yet: the Bangladesh GloFAS
-files on the shared drive are per-year grids that need the Bahadurabad reporting point extracted
-first.
+No published detection number is carried on the KB page for this station. The incumbent is
+GloFAS v4 at Bahadurabad (the framework was calibrated on v3.1 and runs on v4), read from the
+spoke's station-extracted yearly files on the shared drive (`incumbents.glofas_bgd_bahadurabad`)
+and scored by the same event matching at the quantile 1 - 1/5 of its own annual maxima; its rows
+carry release `glofas_v4` and are written with either GRRR release.
 
 Usage:
     uv run scripts/rescore_bgd.py --release 2026
@@ -35,6 +36,7 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 from grrr_releases import empirical_quantile_threshold, reanalysis, shipped_return_periods
+from incumbents import glofas_bgd_bahadurabad
 from rescore_npl import collapse_to_events, match_events
 
 HYBAS = (
@@ -101,6 +103,22 @@ def main(argv=None) -> int:
                 **m,
             }
         )
+    # the incumbent: GloFAS v4 at Bahadurabad, same matching, quantile 1 - 1/5 of its annual maxima
+    gl = glofas_bgd_bahadurabad()
+    gl = gl[(gl.index >= wl.index.min()) & (gl.index <= wl.index.max())]
+    t = empirical_quantile_threshold(gl.groupby(gl.index.year).max(), 5)
+    refs_gl = refs[refs <= gl.index.max()]
+    rows.append(
+        {
+            "release": "glofas_v4",
+            "block": "events",
+            "rp_convention": "quantile_full",
+            "rp": 5,
+            "threshold_m3s": t,
+            **match_events(collapse_to_events(gl[gl > t].index), refs_gl),
+            "note": f"GloFAS v4 ends {gl.index.max().date()}; {len(refs_gl)} of {len(refs)} observed events in range",
+        }
+    )
     # No annual-peak comparison: the 1987-2019 file holds only days above the danger level,
     # so it is not a continuous daily record and seasonal maxima cannot be formed from it.
     df = pd.DataFrame(rows)

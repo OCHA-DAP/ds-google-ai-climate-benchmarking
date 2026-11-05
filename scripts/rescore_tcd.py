@@ -35,6 +35,7 @@ from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent))
 from grrr_releases import reanalysis
+from incumbents import glofas_tcd_ndjamena as load_glofas_ndjamena
 
 HYBAS = "hybas_1120734190"
 MIN_YEAR = 2003
@@ -54,15 +55,6 @@ def load_dre_tp() -> pd.Series:
     s = s[~s.index.duplicated()].sort_index().astype(float)
     s = s[(s.index.year >= MIN_YEAR) & ~s.index.year.isin(DROP_YEARS)]
     return s.rename("level_cm")
-
-
-def load_glofas_ndjamena() -> pd.Series:
-    df = stratus.load_parquet_from_blob(
-        "pa-aa-tcd-flooding/processed/glofas/glofas_reanalysis_ndjamena.parquet", stage="dev"
-    )
-    tcol = "time" if "time" in df.columns else "valid_time"
-    s = df.set_index(pd.to_datetime(df[tcol]).dt.normalize())["dis24"].sort_index()
-    return s[~s.index.duplicated()].rename("q")
 
 
 def score(obs: pd.Series, model: pd.Series, label: str) -> dict:

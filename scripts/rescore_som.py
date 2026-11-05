@@ -18,9 +18,14 @@ the November 2026 release:
 
 Seasons follow the repo: Gu = Mar-May, Deyr = Oct-Dec (the proxy check used Apr-Jun for Gu).
 
+`--release glofas_v5` runs the same code on the proposal's other incumbent leg, the GloFAS v5
+reanalysis per station from the spoke's blob (1999-2023); it has no shipped return-period table,
+so only the `derived` convention is scored.
+
 Usage:
     uv run scripts/rescore_som.py --release 2023
     uv run scripts/rescore_som.py --release 2026
+    uv run scripts/rescore_som.py --release glofas_v5
 Writes outputs/rescore_som_<release>.csv (one row per station, season, metric block).
 """
 
@@ -37,6 +42,7 @@ from scipy import stats
 
 sys.path.insert(0, str(Path(__file__).parent))
 from grrr_releases import reanalysis, shipped_return_periods, weibull_threshold
+from incumbents import glofas_som
 
 STAGE = "dev"
 PREFIX = "ds-aa-som-floods/raw/swalim"
@@ -116,17 +122,20 @@ def main(argv=None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    p.add_argument("--release", choices=["2023", "2026"], required=True)
+    p.add_argument("--release", choices=["2023", "2026", "glofas_v5"], required=True)
     a = p.parse_args(argv)
 
     levels = {st: load_level(f) for st, (_, f, _) in GAUGES.items()}
-    models = {st: reanalysis(a.release, hid) for st, (_, _, hid) in GAUGES.items()}
     shipped = {}
-    for st, (_, _, hid) in GAUGES.items():
-        try:
-            shipped[st] = shipped_return_periods(a.release, hid)
-        except (KeyError, ValueError) as e:
-            print(f"note: no shipped return periods for {st}: {e}", file=sys.stderr)
+    if a.release == "glofas_v5":
+        models = {st: glofas_som(st) for st in GAUGES}
+    else:
+        models = {st: reanalysis(a.release, hid) for st, (_, _, hid) in GAUGES.items()}
+        for st, (_, _, hid) in GAUGES.items():
+            try:
+                shipped[st] = shipped_return_periods(a.release, hid)
+            except (KeyError, ValueError) as e:
+                print(f"note: no shipped return periods for {st}: {e}", file=sys.stderr)
 
     rows = []
     for st, (river, _, _hid) in GAUGES.items():

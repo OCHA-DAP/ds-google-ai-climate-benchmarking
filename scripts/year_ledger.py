@@ -4,7 +4,9 @@ The table the frameworks have used themselves (the Somalia deck's "activations, 
 response, year by year"), built for every framework with a Google-evaluable station:
 
 - framework_fired: the framework's own published backtest years (knowledge-base pages);
-- grrr_2023 / grrr_2026 / observed: one rule for all three. The threshold is the empirical
+- incumbent / grrr_2023 / grrr_2026 / observed: one rule for all four. The incumbent is the
+  model the framework ran on (incumbents.py: GRRR 2023 for Nigeria, GloFAS for Somalia, Nepal,
+  Chad and Bangladesh, the gauge for Niger), scored by its own reanalysis. The threshold is the empirical
   Weibull level at the framework's return period, fitted on seasonal maxima over the same
   BASELINE years (1998-2023, restricted to years the observed record covers), and a year is
   flagged when its seasonal maximum reaches it. Nigeria applies the endorsed rule on top
@@ -36,6 +38,14 @@ from ocha_stratus import emdat
 
 sys.path.insert(0, str(Path(__file__).parent))
 from grrr_releases import reanalysis, weibull_threshold
+from incumbents import (
+    INCUMBENT,
+    TRIGGER_SOURCE,
+    glofas_bgd_bahadurabad,
+    glofas_npl,
+    glofas_som,
+    glofas_tcd_ndjamena,
+)
 from rescore_bgd import load_ffwc_bahadurabad, observed_events
 from rescore_som import GAUGES as SOM_GAUGES
 from rescore_som import load_level
@@ -141,6 +151,51 @@ def model_flags(release: str, baselines: dict[str, tuple[int, int]]) -> dict[str
     for fw, hid in STATION.items():
         q = reanalysis(release, hid)
         out[fw], _, _ = weibull_flags(q, FRAMEWORKS[fw]["season"], RP_LEVEL[fw], baselines[fw])
+    return out
+
+
+def covered(s: pd.Series, months, baseline: tuple[int, int]) -> tuple[int, int]:
+    """The baseline cut to the years the series has a seasonal maximum for."""
+    pk = seasonal_max(s, months)
+    yrs = [int(y) for y in pk.index if baseline[0] <= y <= baseline[1]]
+    if not yrs:
+        raise ValueError("series has no seasonal maxima inside the baseline")
+    return (min(yrs), max(yrs))
+
+
+def incumbent_flags(
+    baselines: dict[str, tuple[int, int]], g23: dict[str, set[int]], obs: dict[str, set[int]]
+) -> dict[str, tuple[set[int], tuple[int, int]]]:
+    """Years flagged by the model each framework ran on, under the same Weibull rule.
+
+    Nigeria 2026 ran on the GRRR 2023 bucket and Niger on the gauge alone, so those columns
+    repeat grrr_2023 and observed; the rest ran on GloFAS (see incumbents.py). Returns, per
+    framework, the flagged years and the baseline years the incumbent record covers.
+    """
+    out = {
+        "Nigeria 2026": (
+            g23["Nigeria 2026"],
+            (baselines["Nigeria 2026"][0], min(baselines["Nigeria 2026"][1], 2023)),
+        )
+    }
+    out["Niger 2025"] = (obs["Niger 2025"], baselines["Niger 2025"])
+    yrs, cov = set(), None
+    for st in ["luuq", "belet_weyne"]:
+        q = glofas_som(st)
+        for months in ([3, 4, 5], [10, 11, 12]):
+            f, _, _ = weibull_flags(q, months, 5.0, baselines["Somalia"])
+            yrs |= f
+        cov = covered(q, [3, 4, 5], baselines["Somalia"])
+    out["Somalia"] = (yrs, cov)
+    series = {
+        "Nepal 2025 (Chatara)": glofas_npl("Chatara"),
+        "Chad 2025": glofas_tcd_ndjamena(),
+        "Bangladesh 2025 (Bahadurabad)": glofas_bgd_bahadurabad(),
+    }
+    for fw, q in series.items():
+        months, b = FRAMEWORKS[fw]["season"], baselines[fw]
+        f, _, _ = weibull_flags(q, months, RP_LEVEL[fw], b)
+        out[fw] = (f, covered(q, months, b))
     return out
 
 
@@ -252,6 +307,7 @@ def main() -> int:
         model_flags("2026", baselines),
         observed_flags(baselines),
     )
+    inc = incumbent_flags(baselines, g23, obs)
     rows, hdr = [], []
     for fw, cfg in FRAMEWORKS.items():
         em = emdat_affected(cfg["iso3"])
@@ -267,6 +323,10 @@ def main() -> int:
                 "fired_n": rate(set(cfg["fired"]), b)[0] if cfg["fired"] else np.nan,
                 "grrr_2023_n": rate(g23[fw], b23)[0],
                 "grrr_2023_years": b23[1] - b23[0] + 1,
+                "incumbent_label": INCUMBENT[fw],
+                "incumbent_n": rate(inc[fw][0], inc[fw][1])[0],
+                "incumbent_years": inc[fw][1][1] - inc[fw][1][0] + 1,
+                "trigger_source": TRIGGER_SOURCE[fw],
                 "grrr_2026_n": rate(g26[fw], b)[0],
                 "observed_n": rate(obs[fw], b)[0],
                 "baseline_years": b[1] - b[0] + 1,
@@ -280,6 +340,7 @@ def main() -> int:
                     "year": y,
                     "framework_fired": int(y in cfg["fired"]) if cfg["fired"] else np.nan,
                     "grrr_2023": int(y in g23[fw]) if y <= 2023 else np.nan,
+                    "incumbent": int(y in inc[fw][0]) if y <= inc[fw][1][1] else np.nan,
                     "grrr_2026": int(y in g26[fw]),
                     "observed": int(y in obs[fw])
                     if (fw != "Nepal 2025 (Chatara)" or y <= 2012)

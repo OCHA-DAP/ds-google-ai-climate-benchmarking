@@ -46,8 +46,9 @@ about Google's November 2026 data release.
 | `scripts/rescore_npl.py` | Nepal: model exceedance events against DHM danger-level crossings at RP2 and RP5, reproducing `ds-aa-npl-flooding` book chapter 05, GloFAS v4 included |
 | `scripts/rescore_nga.py` | Nigeria: GRRR reanalysis against GRDC observed discharge, daily and annual-peak Spearman and 3/5-yr exceedance F1, reproducing `ds-aa-nga-flooding` notebook 08. Results of all three in `docs/rescore-2026-11.md` |
 | `scripts/rescore_tcd.py` | Chad: model annual peaks at N'Djamena against the DRE observed level, 4-yr exceedance years, peak correlation and days early, reproducing the 2025 document's annex; GloFAS v4 included |
-| `scripts/rescore_bgd.py` | Bangladesh: GRRR reanalysis events above RP5 against FFWC severe floods (danger level + 0.85 m for 3 days) at Bahadurabad |
-| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF rapid-response flood allocations. `outputs/year_ledger.csv` |
+| `scripts/rescore_bgd.py` | Bangladesh: GRRR and GloFAS v4 reanalysis events above RP5 against FFWC severe floods (danger level + 0.85 m for 3 days) at Bahadurabad |
+| `scripts/incumbents.py` | The model each framework actually ran on, as daily reanalysis series: GloFAS v4 at Bahadurabad, Chatara/Chisapani and N'Djamena, GloFAS v5 at the Somali gauges; labels and trigger-source lines per framework |
+| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, the model it ran on, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF rapid-response flood allocations. `outputs/year_ledger.csv` |
 
 ## Running
 
@@ -61,7 +62,8 @@ uv run scripts/rescore_npl.py --release 2026                # also 2023; needs A
 uv run scripts/rescore_som.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
 uv run scripts/rescore_nga.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
 uv run scripts/rescore_tcd.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
-uv run scripts/rescore_bgd.py --release 2026                # needs AA_DATA_DIR
+uv run scripts/rescore_bgd.py --release 2026                # needs AA_DATA_DIR; also runs the GloFAS v4 leg
+uv run scripts/rescore_som.py --release glofas_v5           # the Somalia proposal's GloFAS v5 leg
 uv run scripts/year_ledger.py                               # needs blob and AA_DATA_DIR; writes outputs/year_ledger.csv
 ```
 
