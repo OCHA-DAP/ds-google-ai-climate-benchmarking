@@ -428,50 +428,69 @@ IMPACT = [  # (impact column, first year the source covers)
 BOOT = 1000
 
 
-def impact_stats(df: pd.DataFrame, rates: dict[str, dict], rng=None) -> pd.DataFrame:
+def pair_window(d: pd.DataFrame, start: int, b0: int, b1: int) -> tuple[list[int], set[int]]:
+    """The years a framework's key pair is compared on: baseline years inside the measure's
+    coverage where both the incumbent and GRRR 2026 have a record, minus the years the
+    framework's own anticipatory allocation was made. Returns (years, aa_years_removed)."""
+    aa = set(d.loc[d["cerf_aa_usd"].fillna(0) > 0, "year"].astype(int))
+    ok = d[
+        (d.year >= max(start, b0))
+        & (d.year <= b1)
+        & d["incumbent"].notna()
+        & d["grrr_2026"].notna()
+    ]
+    years = [int(y) for y in ok.year if int(y) not in aa]
+    return years, aa & {int(y) for y in ok.year}
+
+
+def impact_stats(
+    df: pd.DataFrame, rates: dict[str, dict], rng=None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Per framework, flag column and impact measure: how the yearly flags line up with impact.
 
     Two measures, both independent of the models: EM-DAT people affected in events touching the
-    monitored basin (1998 on) and CERF rapid-response flood US$ (2006 on). Years with a CERF
-    anticipatory allocation are dropped from both statistics for that framework: the allocation
-    is the framework firing, and rapid response under-reads in those years. Years a source
-    covers but has no record for count as zero; years the flag column lacks are dropped.
+    monitored basin (1998 on) and CERF rapid-response flood US$ (2006 on). Everything is scored on
+    the framework's pair window (`pair_window`): the baseline years both models of the key pair
+    cover, minus the years the framework's own anticipatory allocation was made, since that
+    allocation is the framework firing and rapid response under-reads in those years. The
+    impact years are fixed once per framework and measure on that window: the years whose
+    amount reaches the empirical Weibull level at the framework's return period. Years a source
+    covers but has no record for count as zero.
 
     - rho: Spearman of the 0/1 flag against the amount, with a bootstrap 90% interval over years.
-    - hits / misses / false_alarms: impact years are the years whose amount reaches the empirical
-      Weibull level at the framework's return period, fitted on the same baseline years as the
-      flags; then the flag column is scored against them like a trigger against observations.
+    - hits / misses / false_alarms against the impact years, over the window years the column has.
+    Also returns the paired difference, GRRR 2026 minus incumbent in impact years caught, with a
+    bootstrap 90% interval over the window years, per framework and pooled.
     """
     rng = rng or np.random.default_rng(0)
-    rows = []
+    rows, paired = [], []
+    pooled = {imp: [] for imp, _ in IMPACT}
     for fw, d in df.groupby("framework", sort=False):
-        aa_years = set(d.loc[d["cerf_aa_usd"].fillna(0) > 0, "year"].astype(int))
         b0, b1, rp = rates[fw]["baseline_start"], rates[fw]["baseline_end"], rates[fw]["rp"]
         for imp, start in IMPACT:
-            base = d[(d.year >= max(start, b0)) & (d.year <= b1) & ~d.year.isin(aa_years)]
-            amount = base[imp].fillna(0.0).astype(float)
-            thr = weibull_threshold(amount.values, rp) if len(base) >= 8 else np.nan
+            years, aa_out = pair_window(d, start, b0, b1)
+            w = d[d.year.isin(years)].set_index("year")
+            amount = w[imp].fillna(0.0).astype(float)
+            thr = weibull_threshold(amount.values, rp) if len(w) >= 8 else np.nan
             impact_years = (
-                set(base.loc[amount >= thr, "year"].astype(int)) if not np.isnan(thr) else set()
+                {int(y) for y in amount.index[amount >= thr]} if not np.isnan(thr) else set()
             )
             for col in FLAG_COLS:
-                sub = d[(d.year >= start) & d[col].notna() & ~d.year.isin(aa_years)]
-                x = sub[col].astype(float).values
-                y = sub[imp].fillna(0.0).astype(float).values
+                have = [y for y in years if pd.notna(w.loc[y, col])]
+                x = w.loc[have, col].astype(float).values
+                y_ = w.loc[have, imp].fillna(0.0).astype(float).values
                 r = lo = hi = np.nan
-                if len(sub) >= 3 and len(set(x)) > 1 and len(set(y)) > 1:
-                    r = float(stats.spearmanr(x, y)[0])
+                if len(have) >= 3 and len(set(x)) > 1 and len(set(y_)) > 1:
+                    r = float(stats.spearmanr(x, y_)[0])
                     bs = []
                     for _ in range(BOOT):
                         i = rng.integers(0, len(x), len(x))
-                        if len(set(x[i])) > 1 and len(set(y[i])) > 1:
-                            bs.append(stats.spearmanr(x[i], y[i])[0])
+                        if len(set(x[i])) > 1 and len(set(y_[i])) > 1:
+                            bs.append(stats.spearmanr(x[i], y_[i])[0])
                     if bs:
                         lo, hi = (float(v) for v in np.percentile(bs, [5, 95]))
-                sb = sub[(sub.year >= b0) & (sub.year <= b1)]
-                flagged = set(sb.loc[sb[col] == 1, "year"].astype(int))
-                scored = set(sb.year.astype(int)) & set(base.year.astype(int))
-                hits = len(flagged & impact_years & scored)
+                flagged = {y for y in have if w.loc[y, col] == 1}
+                scored = set(have)
                 rows.append(
                     {
                         "framework": fw,
@@ -480,17 +499,64 @@ def impact_stats(df: pd.DataFrame, rates: dict[str, dict], rng=None) -> pd.DataF
                         "r": r,
                         "r_lo": lo,
                         "r_hi": hi,
-                        "n": len(sub),
+                        "n": len(have),
+                        "window_start": min(years) if years else np.nan,
+                        "window_end": max(years) if years else np.nan,
                         "impact_threshold": thr,
                         "impact_years": ",".join(str(v) for v in sorted(impact_years & scored)),
-                        "hits": hits,
+                        "hits": len(flagged & impact_years),
                         "misses": len((impact_years & scored) - flagged),
-                        "false_alarms": len((flagged & scored) - impact_years),
+                        "false_alarms": len(flagged - impact_years),
                         "n_scored": len(scored),
-                        "aa_years_excluded": ",".join(str(v) for v in sorted(aa_years)),
+                        "aa_years_excluded": ",".join(str(v) for v in sorted(aa_out)),
                     }
                 )
-    return pd.DataFrame(rows)
+            # paired difference on the window, both columns present on every window year
+            inc = w["incumbent"].astype(float).values
+            g26 = w["grrr_2026"].astype(float).values
+            isimp = np.array([int(y) in impact_years for y in w.index])
+            diff = int(((g26 == 1) & isimp).sum() - ((inc == 1) & isimp).sum())
+            bs = []
+            for _ in range(BOOT):
+                i = rng.integers(0, len(w), len(w))
+                bs.append(int(((g26[i] == 1) & isimp[i]).sum() - ((inc[i] == 1) & isimp[i]).sum()))
+            pooled[imp].append(np.array(bs))
+            paired.append(
+                {
+                    "framework": fw,
+                    "impact": imp,
+                    "n_years": len(w),
+                    "n_impact_years": int(isimp.sum()),
+                    "hits_incumbent": int(((inc == 1) & isimp).sum()),
+                    "hits_grrr_2026": int(((g26 == 1) & isimp).sum()),
+                    "fa_incumbent": int(((inc == 1) & ~isimp).sum()),
+                    "fa_grrr_2026": int(((g26 == 1) & ~isimp).sum()),
+                    "diff": diff,
+                    "diff_lo": float(np.percentile(bs, 5)),
+                    "diff_hi": float(np.percentile(bs, 95)),
+                }
+            )
+    for imp, parts in pooled.items():
+        if not parts:
+            continue
+        tot = np.sum(parts, axis=0)
+        sub = [p_ for p_ in paired if p_["impact"] == imp]
+        paired.append(
+            {
+                "framework": "All frameworks",
+                "impact": imp,
+                "n_years": sum(p_["n_years"] for p_ in sub),
+                "n_impact_years": sum(p_["n_impact_years"] for p_ in sub),
+                "hits_incumbent": sum(p_["hits_incumbent"] for p_ in sub),
+                "hits_grrr_2026": sum(p_["hits_grrr_2026"] for p_ in sub),
+                "fa_incumbent": sum(p_["fa_incumbent"] for p_ in sub),
+                "fa_grrr_2026": sum(p_["fa_grrr_2026"] for p_ in sub),
+                "diff": sum(p_["diff"] for p_ in sub),
+                "diff_lo": float(np.percentile(tot, 5)),
+                "diff_hi": float(np.percentile(tot, 95)),
+            }
+        )
+    return pd.DataFrame(rows), pd.DataFrame(paired)
 
 
 def main() -> int:
@@ -556,8 +622,10 @@ def main() -> int:
     Path("outputs").mkdir(exist_ok=True)
     df.to_csv("outputs/year_ledger.csv", index=False)
     pd.DataFrame(hdr).to_csv("outputs/year_ledger_rates.csv", index=False)
-    corr = impact_stats(df, {h["framework"]: h for h in hdr})
+    corr, paired = impact_stats(df, {h["framework"]: h for h in hdr})
     corr.to_csv("outputs/year_ledger_impact_corr.csv", index=False)
+    paired.to_csv("outputs/year_ledger_paired.csv", index=False)
+    print(paired.to_string(index=False))
     print(corr.pivot_table(index=["framework", "impact"], columns="column", values="r").round(2))
     for h in hdr:
         print(h)
