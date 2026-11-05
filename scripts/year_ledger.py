@@ -95,6 +95,14 @@ STATION = {
     "Bangladesh 2025 (Bahadurabad)": "hybas_4121501030",
     "Niger 2025": "hybas_1120679000",
 }
+OBSERVED_LABEL = {  # the local gauge behind each observed column
+    "Nigeria 2026": "GRDC Yidere Bode",
+    "Somalia": "SWALIM gauges",
+    "Nepal 2025 (Chatara)": "DHM Chatara",
+    "Chad 2025": "DRE N'Djamena",
+    "Bangladesh 2025 (Bahadurabad)": "FFWC Bahadurabad",
+    "Niger 2025": "ABN Niamey",
+}
 RP_LEVEL = {
     "Nigeria 2026": 4.0,
     "Somalia": 5.0,
@@ -387,6 +395,7 @@ def main() -> int:
                 "grrr_2026_n": rate(g26[fw], b)[0],
                 "observed_n": rate(obs[fw], b)[0],
                 "observed_years": OBSERVED_YEARS[fw],
+                "observed_label": OBSERVED_LABEL[fw],
                 "baseline_years": b[1] - b[0] + 1,
             }
         )

@@ -43,9 +43,9 @@ INCUMBENT = {
 TRIGGER_SOURCE = {
     "Nigeria 2026": "Trigger: GRRR 2023 bucket, 10 Benue gauges, 6 of 10 over 4-yr levels; GloFAS readiness. Backtest years: framework doc.",
     "Somalia": "Proposed trigger: GloFAS v5 + GRRR 2023 + GEOGloWS vote at SWALIM gauges. Backtest years: spoke analysis.",
-    "Nepal 2025 (Chatara)": "Trigger: GloFAS 7-day readiness at Chatara, RP5 at 50%; DHM bulletin action. No backtest years published.",
+    "Nepal 2025 (Chatara)": "Trigger: GloFAS 7-day readiness at Chatara, RP5 at 50%; DHM bulletin action. No backtest years published; DHM record to 2012.",
     "Chad 2025": "Trigger: GloFAS v4 ensemble mean at N'Djamena, 4,542 m³/s (~RP4). Backtest years: framework doc annex.",
-    "Bangladesh 2025 (Bahadurabad)": "Trigger: GloFAS v3.1-calibrated, run on v4, with FFWC danger level + 0.85 m. No backtest years published.",
+    "Bangladesh 2025 (Bahadurabad)": "Trigger: GloFAS v3.1-calibrated, run on v4, with FFWC danger level + 0.85 m for 3 days (the gauge column's rule). No backtest years published.",
     "Niger 2025": "Trigger: ABN gauge at Niamey, 604 cm, no model. Backtest years: framework doc.",
 }
 
