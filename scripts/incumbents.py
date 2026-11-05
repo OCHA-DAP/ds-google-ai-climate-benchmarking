@@ -17,6 +17,11 @@ read from the team's own copies (frameworks/ pages in the KB give the trigger de
   `ds-aa-som-floods/processed/discharge_daily_glofas_v5.parquet` (1999-2023).
 
 Every loader raises when the file, variable or station is missing; none returns a partial series.
+
+Years after the spoke copy's end come from `outputs/glofas_recent.parquet`, written by
+`scripts/fetch_glofas_recent.py` from the Copernicus Early Warning Data Store at the same cells.
+When that file exists, each loader appends its rows and raises if a gap would be left between
+the spoke record and the fetched years; when it does not, the series ends where the spoke's does.
 """
 
 from __future__ import annotations
@@ -54,6 +59,29 @@ def _root() -> Path:
     return Path(os.environ["AA_DATA_DIR"])
 
 
+RECENT = Path("outputs/glofas_recent.parquet")
+
+
+def _extend(s: pd.Series, framework: str, station: str) -> pd.Series:
+    """Append the EWDS-fetched years for this station, if any, to the spoke series."""
+    if not RECENT.exists():
+        return s
+    r = pd.read_parquet(RECENT)
+    r = r[(r.framework == framework) & (r.station == station)]
+    if r.empty:
+        return s
+    r = r.set_index(pd.to_datetime(r["date"]).dt.normalize())["q"].sort_index()
+    r = r[r.index > s.index.max()]
+    if r.empty:
+        return s
+    if (r.index.min() - s.index.max()).days > 1:
+        raise ValueError(
+            f"{framework}/{station}: spoke record ends {s.index.max().date()}, fetched years start "
+            f"{r.index.min().date()}; fetch the missing years first"
+        )
+    return pd.concat([s, r]).rename("q")
+
+
 def glofas_bgd_bahadurabad() -> pd.Series:
     files = sorted(
         glob.glob(
@@ -77,7 +105,7 @@ def glofas_bgd_bahadurabad() -> pd.Series:
     s.index = pd.to_datetime(s.index).normalize()
     if s.index.duplicated().any() or s.isna().any():
         raise ValueError("Bangladesh GloFAS v4: duplicated days or NaN in the concatenated series")
-    return s.rename("q")
+    return _extend(s.rename("q"), "Bangladesh 2025 (Bahadurabad)", "Bahadurabad")
 
 
 def glofas_npl(station: str) -> pd.Series:
@@ -86,7 +114,9 @@ def glofas_npl(station: str) -> pd.Series:
         raise KeyError(f"Nepal GloFAS v4 file has {list(ds.data_vars)}, not {station}")
     s = ds[station].to_series().dropna()
     s.index = pd.to_datetime(s.index).normalize()
-    return s[~s.index.duplicated()].sort_index().rename("q")
+    return _extend(
+        s[~s.index.duplicated()].sort_index().rename("q"), "Nepal 2025 (Chatara)", station
+    )
 
 
 def glofas_tcd_ndjamena() -> pd.Series:
@@ -95,7 +125,7 @@ def glofas_tcd_ndjamena() -> pd.Series:
     )
     tcol = "time" if "time" in df.columns else "valid_time"
     s = df.set_index(pd.to_datetime(df[tcol]).dt.normalize())["dis24"].sort_index()
-    return s[~s.index.duplicated()].rename("q")
+    return _extend(s[~s.index.duplicated()].rename("q"), "Chad 2025", "ndjamena")
 
 
 def glofas_som(station: str) -> pd.Series:
@@ -106,4 +136,4 @@ def glofas_som(station: str) -> pd.Series:
     if sub.empty:
         raise KeyError(f"Somalia GloFAS v5 parquet has no station {station!r}")
     s = sub.set_index(pd.to_datetime(sub["date"]).dt.normalize())["discharge"].sort_index()
-    return s[~s.index.duplicated()].dropna().rename("q")
+    return _extend(s[~s.index.duplicated()].dropna().rename("q"), "Somalia", station)

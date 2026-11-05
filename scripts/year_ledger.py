@@ -58,22 +58,37 @@ from rescore_tcd import load_dre_tp
 YEARS = list(range(1998, 2026))
 BASELINE = (1998, 2023)
 FRAMEWORKS = {
+    # fired: the framework's published backtest years; window: the years that backtest covered
+    # (cells outside it are blank, not zero)
     "Nigeria 2026": {
         "iso3": "NGA",
         "fired": [1998, 1999, 2012, 2018, 2019, 2022],
+        "window": (1998, 2023),
         "season": [8, 9, 10, 11],
     },
     "Somalia": {
         "iso3": "SOM",
         "fired": [2006, 2010, 2014, 2016, 2018, 2019, 2020, 2023],
+        "window": (1999, 2023),
         "season": None,
     },
-    "Nepal 2025 (Chatara)": {"iso3": "NPL", "fired": [], "season": [6, 7, 8, 9]},
-    "Chad 2025": {"iso3": "TCD", "fired": [2003, 2005, 2010, 2012, 2022], "season": [8, 9, 10, 11]},
-    "Bangladesh 2025 (Bahadurabad)": {"iso3": "BGD", "fired": [], "season": [6, 7, 8, 9]},
+    "Nepal 2025 (Chatara)": {"iso3": "NPL", "fired": [], "window": None, "season": [6, 7, 8, 9]},
+    "Chad 2025": {
+        "iso3": "TCD",
+        "fired": [2003, 2005, 2010, 2012, 2022],
+        "window": (2003, 2022),
+        "season": [8, 9, 10, 11],
+    },
+    "Bangladesh 2025 (Bahadurabad)": {
+        "iso3": "BGD",
+        "fired": [],
+        "window": None,
+        "season": [6, 7, 8, 9],
+    },
     "Niger 2025": {
         "iso3": "NER",
         "fired": [1998, 1999, 2010, 2012, 2013, 2015, 2019, 2020, 2024],
+        "window": (1979, 2024),
         "season": [8, 9],
     },
 }
@@ -407,7 +422,9 @@ def main() -> int:
                     "framework": fw,
                     "iso3": cfg["iso3"],
                     "year": y,
-                    "framework_fired": int(y in cfg["fired"]) if cfg["fired"] else np.nan,
+                    "framework_fired": int(y in cfg["fired"])
+                    if cfg["window"] and cfg["window"][0] <= y <= cfg["window"][1]
+                    else np.nan,
                     "grrr_2023": int(y in g23[fw]) if y <= 2023 else np.nan,
                     "incumbent": int(y in inc[fw][0]) if y <= inc[fw][2] else np.nan,
                     "grrr_2026": int(y in g26[fw]),
