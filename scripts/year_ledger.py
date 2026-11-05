@@ -169,20 +169,22 @@ def covered(s: pd.Series, months, baseline: tuple[int, int]) -> tuple[int, int]:
 
 def incumbent_flags(
     baselines: dict[str, tuple[int, int]], g23: dict[str, set[int]], obs: dict[str, set[int]]
-) -> dict[str, tuple[set[int], tuple[int, int]]]:
+) -> dict[str, tuple[set[int], tuple[int, int], int]]:
     """Years flagged by the model each framework ran on, under the same Weibull rule.
 
     Nigeria 2026 ran on the GRRR 2023 bucket and Niger on the gauge alone, so those columns
     repeat grrr_2023 and observed; the rest ran on GloFAS (see incumbents.py). Returns, per
-    framework, the flagged years and the baseline years the incumbent record covers.
+    framework, the flagged years, the baseline years the incumbent record covers, and the last
+    year it has data for (years after it are blank in the ledger, not zero).
     """
     out = {
         "Nigeria 2026": (
             g23["Nigeria 2026"],
             (baselines["Nigeria 2026"][0], min(baselines["Nigeria 2026"][1], 2023)),
+            2023,
         )
     }
-    out["Niger 2025"] = (obs["Niger 2025"], baselines["Niger 2025"])
+    out["Niger 2025"] = (obs["Niger 2025"], baselines["Niger 2025"], max(obs["Niger 2025"]))
     yrs, cov = set(), None
     for st in ["luuq", "belet_weyne"]:
         q = glofas_som(st)
@@ -190,7 +192,7 @@ def incumbent_flags(
             f, _, _ = weibull_flags(q, months, 5.0, baselines["Somalia"])
             yrs |= f
         cov = covered(q, [3, 4, 5], baselines["Somalia"])
-    out["Somalia"] = (yrs, cov)
+    out["Somalia"] = (yrs, cov, int(q.index.year.max()))
     series = {
         "Nepal 2025 (Chatara)": glofas_npl("Chatara"),
         "Chad 2025": glofas_tcd_ndjamena(),
@@ -199,7 +201,7 @@ def incumbent_flags(
     for fw, q in series.items():
         months, b = FRAMEWORKS[fw]["season"], baselines[fw]
         f, _, _ = weibull_flags(q, months, RP_LEVEL[fw], b)
-        out[fw] = (f, covered(q, months, b))
+        out[fw] = (f, covered(q, months, b), int(q.index.year.max()))
     return out
 
 
@@ -396,7 +398,7 @@ def main() -> int:
                     "year": y,
                     "framework_fired": int(y in cfg["fired"]) if cfg["fired"] else np.nan,
                     "grrr_2023": int(y in g23[fw]) if y <= 2023 else np.nan,
-                    "incumbent": int(y in inc[fw][0]) if y <= inc[fw][1][1] else np.nan,
+                    "incumbent": int(y in inc[fw][0]) if y <= inc[fw][2] else np.nan,
                     "grrr_2026": int(y in g26[fw]),
                     "observed": int(y in obs[fw])
                     if (fw != "Nepal 2025 (Chatara)" or y <= 2012)
