@@ -12,8 +12,8 @@ response, year by year"), built for every framework with a Google-evaluable stat
   flagged when its seasonal maximum reaches it. Nigeria applies the endorsed rule on top
   (>= 6 of 10 gauges over their own level on the same day) and its observed record is GRDC
   discharge at Yidere Bode; Somalia uses the reference gauge of each river (Luuq, Belet Weyne)
-  in either season; Chad the DRE level at N'Djamena; Nepal the DHM level at Chatara (record
-  ends 2012); Niger has no model trigger, so its observed column is the published 604 cm years.
+  in either season; Chad the DRE level at N'Djamena; Nepal the DHM level at Chatara from the
+  drive's updated file (record to 2019; the spoke's book used the earlier file, to 2012); Niger has no model trigger, so its observed column is the published 604 cm years.
   Bangladesh's FFWC file holds only days above the danger level, so its observed column keeps
   the framework's own definition (danger level + 0.85 m for 3 days) and its model columns use
   the Weibull rule; the two are not on the same footing and the header says so.
@@ -234,7 +234,7 @@ def observed_series() -> dict[str, tuple[pd.Series, list[int] | None]]:
     dhm = (
         pd.read_csv(
             Path(os.environ["AA_DATA_DIR"])
-            / "private/exploration/npl/dhm/processed/waterl_level_procssed.csv",
+            / "private/exploration/npl/dhm/processed/water_level_processed_updated.csv",
             parse_dates=["date"],
         )
         .set_index("date")["Chatara"]
@@ -245,6 +245,7 @@ def observed_series() -> dict[str, tuple[pd.Series, list[int] | None]]:
 
 
 OBSERVED_YEARS: dict[str, int] = {}  # baseline years the observed record actually has
+OBSERVED_END: dict[str, int] = {}  # last year the observed record covers
 
 
 def observed_flags(baselines: dict[str, tuple[int, int]]) -> dict[str, set[int]]:
@@ -253,6 +254,7 @@ def observed_flags(baselines: dict[str, tuple[int, int]]) -> dict[str, set[int]]
     obs = observed_series()
     for fw, (s, months) in obs.items():
         out[fw], _, OBSERVED_YEARS[fw] = weibull_flags(s, months, RP_LEVEL[fw], baselines[fw])
+        OBSERVED_END[fw] = int(s.index.year.max())
     # Somalia: reference gauge levels, Weibull RP5 per season on the same baseline
     yrs = set()
     for st in ["luuq", "belet_weyne"]:
@@ -409,9 +411,7 @@ def main() -> int:
                     "grrr_2023": int(y in g23[fw]) if y <= 2023 else np.nan,
                     "incumbent": int(y in inc[fw][0]) if y <= inc[fw][2] else np.nan,
                     "grrr_2026": int(y in g26[fw]),
-                    "observed": int(y in obs[fw])
-                    if (fw != "Nepal 2025 (Chatara)" or y <= 2012)
-                    else np.nan,
+                    "observed": int(y in obs[fw]) if y <= OBSERVED_END.get(fw, 2025) else np.nan,
                     "emdat_affected": em.get(y, np.nan),
                     "cerf_flood_usd": cf.get(y, np.nan) if y >= 2006 else np.nan,
                     "cerf_aa_usd": ca.get(y, np.nan) if y >= 2020 else np.nan,
