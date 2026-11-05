@@ -55,6 +55,19 @@ TRIGGER_SOURCE = {
 }
 
 
+# which ledger columns share a source with the framework's trigger, and whether impact data went
+# into the design (from the framework review: "Impact in the decision?"); the statistics drop the
+# anticipatory-allocation years for every column, this line says what circularity remains
+TAINT = {
+    "Nigeria 2026": "Backtest, ran-on and GRRR 2023 are one model. Gauges chosen on FloodScan, not EM-DAT or CERF, so both impact rows are independent of the design.",
+    "Somalia": "Backtest is the joint vote; GloFAS v5 and GRRR 2023 are two of its legs. The proposal's year table showed EM-DAT and CERF beside the trigger, so they informed the design.",
+    "Nepal 2025 (Chatara)": "No backtest. Thresholds set on GloFAS return periods; impact years were shown in the document, not used to set them.",
+    "Chad 2025": "Backtest and ran-on are one model. The document showed CERF years beside the trigger; the threshold was set on the GloFAS return period.",
+    "Bangladesh 2025 (Bahadurabad)": "No backtest. The 2020 design used impact years as input; thresholds on GloFAS and the FFWC danger level.",
+    "Niger 2025": "Backtest, ran-on and gauge are one list. Threshold set on the gauge's return period with CERF years as context.",
+}
+
+
 def _root() -> Path:
     return Path(os.environ["AA_DATA_DIR"])
 

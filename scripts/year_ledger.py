@@ -44,6 +44,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from grrr_releases import reanalysis, weibull_threshold
 from incumbents import (
     INCUMBENT,
+    TAINT,
     TRIGGER_SOURCE,
     glofas_bgd_bahadurabad,
     glofas_npl,
@@ -305,9 +306,91 @@ def baselines_from_records() -> dict[str, tuple[int, int]]:
     return b
 
 
-def emdat_affected(iso3: str) -> dict[int, float]:
+# EM-DAT is national; these words in an event's Location, Admin Units or River Basin text mark
+# it as touching the monitored basin. Whole-event totals are kept (EM-DAT does not split them).
+BASIN_WORDS = {
+    "Nigeria 2026": [
+        "adamawa",
+        "taraba",
+        "benue",
+        "kogi",
+        "nasarawa",
+        "lokoja",
+        "yola",
+        "numan",
+        "makurdi",
+    ],
+    "Somalia": [
+        "juba",
+        "jubba",
+        "shabel",
+        "shabeel",
+        "gedo",
+        "hiraan",
+        "hiran",
+        "hirshabelle",
+        "jubaland",
+        "belet",
+        "beled",
+        "jowhar",
+        "luuq",
+        "bardheere",
+        "baardheere",
+        "bualle",
+        "bu'aale",
+        "dollow",
+        "doolow",
+        "bulo burti",
+        "buulo",
+        "jilib",
+        "afgooye",
+    ],
+    "Nepal 2025 (Chatara)": [
+        "koshi",
+        "kosi",
+        "sunsari",
+        "saptari",
+        "udayapur",
+        "morang",
+        "chatara",
+        "province 1",
+        "province no. 1",
+        "eastern",
+    ],
+    "Chad 2025": ["djamena", "chari", "logone", "hadjer", "baguirmi", "mayo-kebbi", "mayo kebbi"],
+    "Bangladesh 2025 (Bahadurabad)": [
+        "jamuna",
+        "brahmaputra",
+        "kurigram",
+        "gaibandha",
+        "jamalpur",
+        "bogra",
+        "bogura",
+        "sirajganj",
+        "tangail",
+        "lalmonirhat",
+        "nilphamari",
+        "rangpur",
+    ],
+    "Niger 2025": ["niamey", "tillab", "dosso", "niger river", "fleuve niger", "fleuve"],
+}
+
+
+def emdat_affected(iso3: str, basin_words: list[str] | None = None) -> dict[int, float]:
+    """People affected by floods per start year; with basin_words, only events whose location
+    text mentions the monitored basin (whole-event totals)."""
     em = emdat.load_emdat_from_blob(iso3=iso3)
     fl = em[em["Disaster Type"].astype(str).str.contains("Flood", case=False)]
+    if basin_words:
+        text = (
+            fl["Location"].fillna("").astype(str)
+            + " "
+            + fl["Admin Units"].fillna("").astype(str)
+            + " "
+            + fl["River Basin"].fillna("").astype(str)
+        ).str.lower()
+        hit = text.apply(lambda s: any(w in s for w in basin_words))
+        fl = fl[hit]
     return (
         fl.groupby("Start Year")["Total Affected"].sum(min_count=1).dropna().astype(float).to_dict()
     )
@@ -338,44 +421,73 @@ def cerf_flood(iso3: str) -> tuple[dict[int, float], dict[int, float]]:
 
 
 FLAG_COLS = ["framework_fired", "incumbent", "grrr_2026", "observed", "grrr_2023"]
-IMPACT = [  # (impact column, first year the source covers, statistic)
-    ("emdat_affected", 1998, "spearman"),
-    ("cerf_total_usd", 2006, "spearman"),
-    ("cerf_total_usd", 2006, "phi"),
+IMPACT = [  # (impact column, first year the source covers)
+    ("emdat_basin", 1998),
+    ("cerf_flood_usd", 2006),
 ]
+BOOT = 1000
 
 
-def impact_correlations(df: pd.DataFrame) -> pd.DataFrame:
-    """Per framework and flag column, how the yearly flags line up with the impact and response columns.
+def impact_stats(df: pd.DataFrame, rates: dict[str, dict], rng=None) -> pd.DataFrame:
+    """Per framework, flag column and impact measure: how the yearly flags line up with impact.
 
-    Spearman rank correlation of the 0/1 flag against the amount (people affected, CERF flood
-    US$ with rapid response and anticipatory combined), and phi (Pearson on two 0/1 series)
-    against whether any CERF flood allocation was made that year. Years a source covers but has no record for count as zero; years the flag column
-    lacks are dropped. n is written next to every value; constant series give NaN.
+    Two measures, both independent of the models: EM-DAT people affected in events touching the
+    monitored basin (1998 on) and CERF rapid-response flood US$ (2006 on). Years with a CERF
+    anticipatory allocation are dropped from both statistics for that framework: the allocation
+    is the framework firing, and rapid response under-reads in those years. Years a source
+    covers but has no record for count as zero; years the flag column lacks are dropped.
+
+    - rho: Spearman of the 0/1 flag against the amount, with a bootstrap 90% interval over years.
+    - hits / misses / false_alarms: impact years are the years whose amount reaches the empirical
+      Weibull level at the framework's return period, fitted on the same baseline years as the
+      flags; then the flag column is scored against them like a trigger against observations.
     """
+    rng = rng or np.random.default_rng(0)
     rows = []
     for fw, d in df.groupby("framework", sort=False):
-        for col in FLAG_COLS:
-            for imp, start, stat in IMPACT:
-                sub = d[(d.year >= start) & d[col].notna()]
-                x = sub[col].astype(float)
-                y = sub[imp].fillna(0.0).astype(float)
-                if stat == "phi":
-                    y = (y > 0).astype(float)
-                if len(sub) < 3 or x.nunique() < 2 or y.nunique() < 2:
-                    r = np.nan
-                elif stat == "spearman":
+        aa_years = set(d.loc[d["cerf_aa_usd"].fillna(0) > 0, "year"].astype(int))
+        b0, b1, rp = rates[fw]["baseline_start"], rates[fw]["baseline_end"], rates[fw]["rp"]
+        for imp, start in IMPACT:
+            base = d[(d.year >= max(start, b0)) & (d.year <= b1) & ~d.year.isin(aa_years)]
+            amount = base[imp].fillna(0.0).astype(float)
+            thr = weibull_threshold(amount.values, rp) if len(base) >= 8 else np.nan
+            impact_years = (
+                set(base.loc[amount >= thr, "year"].astype(int)) if not np.isnan(thr) else set()
+            )
+            for col in FLAG_COLS:
+                sub = d[(d.year >= start) & d[col].notna() & ~d.year.isin(aa_years)]
+                x = sub[col].astype(float).values
+                y = sub[imp].fillna(0.0).astype(float).values
+                r = lo = hi = np.nan
+                if len(sub) >= 3 and len(set(x)) > 1 and len(set(y)) > 1:
                     r = float(stats.spearmanr(x, y)[0])
-                else:
-                    r = float(np.corrcoef(x, y)[0, 1])
+                    bs = []
+                    for _ in range(BOOT):
+                        i = rng.integers(0, len(x), len(x))
+                        if len(set(x[i])) > 1 and len(set(y[i])) > 1:
+                            bs.append(stats.spearmanr(x[i], y[i])[0])
+                    if bs:
+                        lo, hi = (float(v) for v in np.percentile(bs, [5, 95]))
+                sb = sub[(sub.year >= b0) & (sub.year <= b1)]
+                flagged = set(sb.loc[sb[col] == 1, "year"].astype(int))
+                scored = set(sb.year.astype(int)) & set(base.year.astype(int))
+                hits = len(flagged & impact_years & scored)
                 rows.append(
                     {
                         "framework": fw,
                         "column": col,
                         "impact": imp,
-                        "stat": stat,
                         "r": r,
+                        "r_lo": lo,
+                        "r_hi": hi,
                         "n": len(sub),
+                        "impact_threshold": thr,
+                        "impact_years": ",".join(str(v) for v in sorted(impact_years & scored)),
+                        "hits": hits,
+                        "misses": len((impact_years & scored) - flagged),
+                        "false_alarms": len((flagged & scored) - impact_years),
+                        "n_scored": len(scored),
+                        "aa_years_excluded": ",".join(str(v) for v in sorted(aa_years)),
                     }
                 )
     return pd.DataFrame(rows)
@@ -393,6 +505,7 @@ def main() -> int:
     rows, hdr = [], []
     for fw, cfg in FRAMEWORKS.items():
         em = emdat_affected(cfg["iso3"])
+        emb = emdat_affected(cfg["iso3"], BASIN_WORDS[fw])
         cf, ca = cerf_flood(cfg["iso3"])
         b = baselines[fw]
         b23 = (b[0], min(b[1], 2023))
@@ -409,6 +522,7 @@ def main() -> int:
                 "incumbent_n": rate(inc[fw][0], inc[fw][1])[0],
                 "incumbent_years": inc[fw][1][1] - inc[fw][1][0] + 1,
                 "trigger_source": TRIGGER_SOURCE[fw],
+                "taint": TAINT[fw],
                 "grrr_2026_n": rate(g26[fw], b)[0],
                 "observed_n": rate(obs[fw], b)[0],
                 "observed_years": OBSERVED_YEARS[fw],
@@ -430,6 +544,7 @@ def main() -> int:
                     "grrr_2026": int(y in g26[fw]),
                     "observed": int(y in obs[fw]) if y <= OBSERVED_END.get(fw, 2025) else np.nan,
                     "emdat_affected": em.get(y, np.nan),
+                    "emdat_basin": emb.get(y, np.nan),
                     "cerf_flood_usd": cf.get(y, np.nan) if y >= 2006 else np.nan,
                     "cerf_aa_usd": ca.get(y, np.nan) if y >= 2020 else np.nan,
                     "cerf_total_usd": (cf.get(y, 0.0) + ca.get(y, 0.0))
@@ -441,13 +556,9 @@ def main() -> int:
     Path("outputs").mkdir(exist_ok=True)
     df.to_csv("outputs/year_ledger.csv", index=False)
     pd.DataFrame(hdr).to_csv("outputs/year_ledger_rates.csv", index=False)
-    corr = impact_correlations(df)
+    corr = impact_stats(df, {h["framework"]: h for h in hdr})
     corr.to_csv("outputs/year_ledger_impact_corr.csv", index=False)
-    print(
-        corr.pivot_table(index=["framework", "impact", "stat"], columns="column", values="r").round(
-            2
-        )
-    )
+    print(corr.pivot_table(index=["framework", "impact"], columns="column", values="r").round(2))
     for h in hdr:
         print(h)
     for fw in FRAMEWORKS:
