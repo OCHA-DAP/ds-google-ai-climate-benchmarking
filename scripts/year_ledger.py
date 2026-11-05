@@ -230,11 +230,15 @@ def observed_series() -> dict[str, tuple[pd.Series, list[int] | None]]:
     return out
 
 
+OBSERVED_YEARS: dict[str, int] = {}  # baseline years the observed record actually has
+
+
 def observed_flags(baselines: dict[str, tuple[int, int]]) -> dict[str, set[int]]:
+    """Years the observed record flags; OBSERVED_YEARS gets the baseline years each record has."""
     out = {}
     obs = observed_series()
     for fw, (s, months) in obs.items():
-        out[fw], _, _ = weibull_flags(s, months, RP_LEVEL[fw], baselines[fw])
+        out[fw], _, OBSERVED_YEARS[fw] = weibull_flags(s, months, RP_LEVEL[fw], baselines[fw])
     # Somalia: reference gauge levels, Weibull RP5 per season on the same baseline
     yrs = set()
     for st in ["luuq", "belet_weyne"]:
@@ -243,10 +247,13 @@ def observed_flags(baselines: dict[str, tuple[int, int]]) -> dict[str, set[int]]
             f, _, _ = weibull_flags(lv, months, 5.0, baselines["Somalia"])
             yrs |= f
     out["Somalia"] = yrs
+    OBSERVED_YEARS["Somalia"] = baselines["Somalia"][1] - baselines["Somalia"][0] + 1
     out["Bangladesh 2025 (Bahadurabad)"] = {
         int(d.year) for d in observed_events(load_ffwc_bahadurabad())
     }
     out["Niger 2025"] = set(FRAMEWORKS["Niger 2025"]["fired"])
+    for fw in ("Bangladesh 2025 (Bahadurabad)", "Niger 2025"):
+        OBSERVED_YEARS[fw] = baselines[fw][1] - baselines[fw][0] + 1
     return out
 
 
@@ -329,6 +336,7 @@ def main() -> int:
                 "trigger_source": TRIGGER_SOURCE[fw],
                 "grrr_2026_n": rate(g26[fw], b)[0],
                 "observed_n": rate(obs[fw], b)[0],
+                "observed_years": OBSERVED_YEARS[fw],
                 "baseline_years": b[1] - b[0] + 1,
             }
         )
