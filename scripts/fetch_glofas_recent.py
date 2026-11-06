@@ -62,9 +62,25 @@ POINTS = {
     # sits at about 26.95, 87.15; the GloFAS cell for it is one row south)
     "Nepal 2025 (Chatara)": ("version_4_0", 2024, {"Chatara": (26.825, 87.125)}),
     "Chad 2025": ("version_4_0", 2025, {"ndjamena": (12.125, 15.025)}),
-    "Bangladesh 2025 (Bahadurabad)": ("version_4_0", 2023, {"Bahadurabad": (25.15, 89.65)}),
+    # the cell whose 2022 peak equals the spoke's Bahadurabad series; starts at 2022 because the
+    # spoke copy keeps the end-of-window stamp, so its last day (31 Dec 2022) is followed by the
+    # 1 Jan 2023 stamp that the store serves inside the 2022 request
+    "Bangladesh 2025 (Bahadurabad)": ("version_4_0", 2022, {"Bahadurabad": (25.175, 89.675)}),
 }
 BOX = 0.15  # half-width of the request box in degrees
+
+# EWDS stamps each daily mean at the end of its 24-hour window (a year runs 2 Jan to 1 Jan). The
+# spokes' copies differ: Chad, Nepal and Somalia stamp it at the start of the day (1 Jan to
+# 31 Dec), Bangladesh keeps the end-of-window stamp. Days shifted to each spoke's convention so
+# the series join without a gap or a double day; established on overlap years the spokes already
+# hold (outputs/glofas_recent/verify/, docs/rescore-2026-11.md), where the fetched cell equals the
+# spoke copy to the decimal once shifted.
+STAMP_SHIFT_DAYS = {
+    "Somalia": -1,
+    "Nepal 2025 (Chatara)": -1,
+    "Chad 2025": -1,
+    "Bangladesh 2025 (Bahadurabad)": 0,
+}
 
 
 JOBS = RAW / "jobs.json"
@@ -164,7 +180,7 @@ def poll_and_download(jobs: dict, poll_s: int = 300) -> dict:
     return outcome
 
 
-def cell_series(path: Path, lat: float, lon: float) -> pd.Series:
+def cell_series(path: Path, lat: float, lon: float, shift_days: int) -> pd.Series:
     ds = xr.open_dataset(path)
     var = "dis24" if "dis24" in ds else next(iter(ds.data_vars))
     da = ds[var]
@@ -174,15 +190,11 @@ def cell_series(path: Path, lat: float, lon: float) -> pd.Series:
     s = s.dropna()
     if s.empty:
         raise ValueError(f"{path}: no values at the nearest cell to ({lat}, {lon})")
-    # EWDS stamps each daily mean at the end of its 24-hour window (a year runs 2 Jan to 1 Jan);
-    # the spokes' copies stamp it at the start of the day (1 Jan to 31 Dec). Shift to the spoke
-    # convention so the series join without a gap. Verified against the overlap years in
-    # outputs/glofas_recent/verify/ (see docs/rescore-2026-11.md).
     if s.index.min().dayofyear != 2:
         raise ValueError(
             f"{path}: expected an end-of-window stamp starting 2 January, got {s.index.min().date()}"
         )
-    s.index = s.index - pd.Timedelta(days=1)
+    s.index = s.index + pd.Timedelta(days=shift_days)  # see STAMP_SHIFT_DAYS
     return s.rename("q")
 
 
@@ -227,7 +239,7 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
             continue
-        s = cell_series(target, lat, lon)
+        s = cell_series(target, lat, lon, STAMP_SHIFT_DAYS[fw])
         print(
             f"{fw} {st} {version} {y}: {s.index.min().date()} to {s.index.max().date()}, {len(s)} days"
         )
