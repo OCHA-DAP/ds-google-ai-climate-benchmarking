@@ -58,7 +58,9 @@ POINTS = {
             "dollow": (4.175, 42.075),
         },
     ),
-    "Nepal 2025 (Chatara)": ("version_4_0", 2024, {"Chatara": (26.95, 87.15)}),
+    # the cell whose 2023 values equal the spoke's Chatara series to the decimal (the gauge itself
+    # sits at about 26.95, 87.15; the GloFAS cell for it is one row south)
+    "Nepal 2025 (Chatara)": ("version_4_0", 2024, {"Chatara": (26.825, 87.125)}),
     "Chad 2025": ("version_4_0", 2025, {"ndjamena": (12.125, 15.025)}),
     "Bangladesh 2025 (Bahadurabad)": ("version_4_0", 2023, {"Bahadurabad": (25.15, 89.65)}),
 }
