@@ -172,6 +172,15 @@ def cell_series(path: Path, lat: float, lon: float) -> pd.Series:
     s = s.dropna()
     if s.empty:
         raise ValueError(f"{path}: no values at the nearest cell to ({lat}, {lon})")
+    # EWDS stamps each daily mean at the end of its 24-hour window (a year runs 2 Jan to 1 Jan);
+    # the spokes' copies stamp it at the start of the day (1 Jan to 31 Dec). Shift to the spoke
+    # convention so the series join without a gap. Verified against the overlap years in
+    # outputs/glofas_recent/verify/ (see docs/rescore-2026-11.md).
+    if s.index.min().dayofyear != 2:
+        raise ValueError(
+            f"{path}: expected an end-of-window stamp starting 2 January, got {s.index.min().date()}"
+        )
+    s.index = s.index - pd.Timedelta(days=1)
     return s.rename("q")
 
 
