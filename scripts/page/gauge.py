@@ -15,8 +15,9 @@ Thresholds are on the same convention for both models of a pair: each at the qua
 own reanalysis where the incumbent has no published level (Somalia, Bangladesh, Chad, Nigeria),
 each at its provider's published level in Nepal (GloFAS at the Copernicus dashboard value the
 framework uses, GRRR at the release's table). Nepal is scored at the 2025 trigger's RP5 at
-Chatara. Section 3 also shows GRRR at its shipped levels, which fire more often in Somalia and
-Bangladesh; the choice moves false alarms, not the events caught.
+Chatara. Section 3 also shows GRRR at its shipped levels, which sit lower and fire more often: in
+Somalia they catch one more episode at 4 of 7 gauges and in Bangladesh one more flood, with
+more false alarms in both.
 
 No pooled row: the event units differ across frameworks, so their counts do not add.
 
