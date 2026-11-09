@@ -1018,3 +1018,134 @@ def fig_paired():
     )
     out.append("</svg>")
     return "".join(out)
+
+
+def fig_gauge():
+    """GRRR 2026 against the incumbent on each framework's own gauge test (section 3), reduced to
+    the same four numbers as the impact side: rank correlation with the observed record, share of
+    observed events caught, false-alarm ratio and CSI, per trigger station. Absolute values as
+    dumbbells; no intervals (point results of the rescores) and no pooled row (the event units
+    differ). Reads outputs/rescore_gauge_2x2.csv."""
+    rows = list(csv.DictReader(open(REPO + "rescore_gauge_2x2.csv")))
+    f = lambda v: None if v in ("", None) else float(v)
+    panels = [
+        ("rho", "rank ρ with the observed record"),
+        ("pod", "observed events caught, share of N"),
+        ("far", "false-alarm ratio, FA / (hits + FA)"),
+        ("csi", "CSI, hits / (hits + misses + FA)"),
+    ]
+
+    def vals(r):
+        n, h_i, fa_i, h6, fa6 = (
+            f(r[k])
+            for k in ("n_obs", "hits_incumbent", "fa_incumbent", "hits_grrr_2026", "fa_grrr_2026")
+        )
+        if n is None:
+            return None
+        return {
+            "rho": (f(r["rho_incumbent"]), f(r["rho_grrr_2026"])),
+            "pod": (h_i / n, h6 / n),
+            "far": (
+                fa_i / (h_i + fa_i) if h_i + fa_i else None,
+                fa6 / (h6 + fa6) if h6 + fa6 else None,
+            ),
+            "csi": (f(r["csi_incumbent"]), f(r["csi_grrr_2026"])),
+        }
+
+    w, rh, label_w, pw, gap = 1250, 20, 215, 185, 18
+    y0 = 96
+    h = y0 + rh * len(rows) + 92
+    out = [
+        f"<svg viewBox='0 0 {w} {h}' role='img' aria-label='GRRR 2026 against the incumbent on each framework&#39;s own gauge test: correlation, events caught, false-alarm ratio and CSI per station' font-family='var(--body)' font-size='11'>"
+    ]
+    out.append(
+        f"<text x='8' y='18' font-size='14' font-weight='600' fill='{INK}'>On the frameworks' own gauge tests, scored the same way: the 2026 model against the model each framework runs on</text>"
+    )
+    out.append(
+        f"<text x='8' y='36' fill='{QUIET}'>Each framework's section-3 test reduced to the impact side's four numbers, per trigger station: rank correlation with the observed record where the test reports one, observed events caught</text>"
+    )
+    out.append(
+        f"<text x='8' y='50' fill='{QUIET}'>(RP3 episodes, 3-yr or 4-yr peak years, DHM danger-level crossings, FFWC severe floods), false alarms (model events matching none) and the critical success index. Segment joins the</text>"
+    )
+    out.append(
+        f"<text x='8' y='64' fill='{QUIET}'>incumbent to GRRR 2026; right of the incumbent is better except for the false-alarm ratio. Both models of a pair on one threshold convention (own quantile; published levels in Nepal). Point results, no intervals.</text>"
+    )
+    out.append(
+        f"<text x='8' y='78' fill='{QUIET}'>Right: CSI 2026 v incumbent, events caught of N, false alarms. No pooled row: episodes, crossings, severe floods and peak years are different units and do not add.</text>"
+    )
+    y = y0
+    for p, (_dk, ptitle) in enumerate(panels):
+        x0 = label_w + 10 + p * (pw + gap)
+        x1 = x0 + pw
+        out.append(f"<text x='{x0}' y='{y - 4}' fill='{QUIET}' font-size='10'>{esc(ptitle)}</text>")
+        for t in (0, 0.25, 0.5, 0.75, 1):
+            tx = x0 + t * (x1 - x0)
+            out.append(
+                f"<line x1='{tx:.1f}' x2='{tx:.1f}' y1='{y + 2}' y2='{y + 2 + rh * len(rows)}' stroke='{LINE}' stroke-opacity='{1 if t in (0, 1) else 0.5}'/>"
+            )
+            out.append(
+                f"<text x='{tx:.1f}' y='{y + rh * len(rows) + 14}' text-anchor='middle' fill='{QUIET}' font-size='9'>{t:g}</text>"
+            )
+    xr = label_w + 10 + len(panels) * (pw + gap) - gap + 12
+    prev = None
+    for i, r in enumerate(rows):
+        cy = y + 2 + i * rh + rh / 2
+        fw = r["framework"]
+        if fw != prev:
+            if i:
+                out.append(
+                    f"<line x1='8' x2='{w - 8}' y1='{cy - rh / 2:.1f}' y2='{cy - rh / 2:.1f}' stroke='{LINE}'/>"
+                )
+            out.append(
+                f"<text x='8' y='{cy + 4:.1f}' fill='{INK}' font-weight='600'>{esc(fw.replace(' (Chatara)', '').replace(' (Bahadurabad)', ''))}</text>"
+            )
+            prev = fw
+        out.append(
+            f"<text x='{label_w}' y='{cy + 4:.1f}' text-anchor='end' fill='{INK}'>{esc(r['station'])}</text>"
+        )
+        v = vals(r)
+        if v is None:
+            out.append(
+                f"<text x='{label_w + 10}' y='{cy + 4:.1f}' fill='{QUIET}'>{esc(r['test'])}: no model to compare. {esc(r['incumbent'])}.</text>"
+            )
+            continue
+        inc_col = C23 if r["incumbent"].startswith("GRRR") else INC
+        for p, (dk, _) in enumerate(panels):
+            x0 = label_w + 10 + p * (pw + gap)
+            sx = lambda t, x0=x0: x0 + t * pw
+            vi, v6 = v[dk]
+            if vi is None and v6 is None:
+                if fw != rows[i - 1]["framework"] if i else True:
+                    out.append(
+                        f"<text x='{x0 + pw / 2:.1f}' y='{cy + 4:.1f}' text-anchor='middle' fill='{QUIET}' font-size='9'>not in this test</text>"
+                    )
+                continue
+            if vi is not None and v6 is not None:
+                out.append(
+                    f"<line x1='{sx(vi):.1f}' x2='{sx(v6):.1f}' y1='{cy:.1f}' y2='{cy:.1f}' stroke='{QUIET}' stroke-width='2' stroke-opacity='0.6'/>"
+                )
+            if vi is not None:
+                out.append(f"<circle cx='{sx(vi):.1f}' cy='{cy:.1f}' r='4.5' fill='{inc_col}'/>")
+            if v6 is not None:
+                out.append(f"<circle cx='{sx(v6):.1f}' cy='{cy:.1f}' r='4.5' fill='{C26}'/>")
+        out.append(
+            f"<text x='{xr}' y='{cy + 4:.1f}' fill='{INK}' font-size='10'>CSI {float(r['csi_grrr_2026']):.2f} v {float(r['csi_incumbent']):.2f} · {int(float(r['hits_grrr_2026']))} v {int(float(r['hits_incumbent']))} of {int(float(r['n_obs']))} · FA {int(float(r['fa_grrr_2026']))} v {int(float(r['fa_incumbent']))}</text>"
+        )
+    ly = y + 2 + rh * len(rows) + 40
+    out.append(
+        f"<circle cx='16' cy='{ly - 4}' r='4.5' fill='{INC}'/><text x='26' y='{ly}' fill='{QUIET}'>ran on: GloFAS v4 or v5</text>"
+    )
+    out.append(
+        f"<circle cx='190' cy='{ly - 4}' r='4.5' fill='{C23}'/><text x='200' y='{ly}' fill='{QUIET}'>ran on: GRRR 2023 bucket (Nigeria)</text>"
+    )
+    out.append(
+        f"<circle cx='420' cy='{ly - 4}' r='4.5' fill='{C26}'/><text x='430' y='{ly}' fill='{QUIET}'>GRRR November 2026</text>"
+    )
+    out.append(
+        f"<text x='8' y='{ly + 18}' fill='{QUIET}'>Tests: Somalia RP3 episodes at each SWALIM gauge 2002–2023, ρ the mean of Gu and Deyr daily ρ against the river's reference gauge; Nigeria 3-yr peak years and annual-peak ρ against GRDC, 1981–2023; Nepal DHM crossings at Chatara,</text>"
+    )
+    out.append(
+        f"<text x='8' y='{ly + 32}' fill='{QUIET}'>model at the 2025 trigger's RP5; Chad 4-yr peak years and annual-peak ρ against the DRE level at N'Djamena 2003–2022; Bangladesh FFWC severe floods at Bahadurabad, model at RP5. Full tables in section 3.</text>"
+    )
+    out.append("</svg>")
+    return "".join(out)

@@ -9,6 +9,7 @@ Reproduces `ds-aa-nga-flooding` notebook `exploration/2026/08_grdc_gauge_compare
   no gap > 14 days in Aug-Oct; stations kept with >= 15 valid years;
 - empirical 3-yr and 5-yr thresholds on each side (quantile 1 - 1/RP of the annual maxima);
   years each side flags; hits, misses, false alarms, F1; annual-peak Spearman.
+- years limited to 1981-2023, the years both releases cover in full, so they score the same years.
 
 The notebook's GRDC-to-gauge mapping is carried as is, including both candidates where it
 marks one as uncertain (Lokoja, Wuroboki) and Onitsha, which it marks "not qa".
@@ -50,6 +51,10 @@ WET = [7, 8, 9, 10, 11]
 PEAK = [8, 9, 10]
 MIN_WET_OBS, MAX_GAP, MIN_YEARS = 120, 14, 15
 RPS = [3, 5]
+# the years both releases cover in full (the 2023 bucket runs 1 Jan 1980 to 23 Dec 2023, the
+# 2026 release 31 Dec 1980 to 30 Dec 2025), so both are scored on the same years and the
+# comparison is paired
+COMMON_YEARS = range(1981, 2024)
 
 
 def load_grdc() -> pd.DataFrame:
@@ -104,7 +109,7 @@ def main(argv=None) -> int:
         j = pd.concat([obs, q], axis=1, join="inner").dropna()
         daily_rho = float(stats.spearmanr(j["obs"], j["q"])[0]) if len(j) > 30 else float("nan")
         years = valid_wet_years(obs)
-        years = [y for y in years if y in set(q.index.year)]
+        years = [y for y in years if y in set(q.index.year) and y in COMMON_YEARS]
         row = {
             "release": a.release,
             "grdc_id": gid,

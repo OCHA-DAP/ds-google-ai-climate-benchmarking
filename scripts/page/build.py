@@ -8,12 +8,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 import charts
 import data
+import gauge
 import summary
 
 PAGE = Path(charts.REPO) / "page"
 PAGE.mkdir(exist_ok=True)
 data.write()
 summary.patch()
+GAUGE = gauge.write()
+GV = gauge.verdicts(GAUGE)
 d = json.load(open(PAGE / "page_data.json"))
 T = d["totals"]
 
@@ -332,6 +335,7 @@ import os
 
 FIG_LEDGER = charts.fig_ledger() if os.path.exists(charts.REPO + "year_ledger.csv") else ""
 FIG_PAIRED = charts.fig_paired() if os.path.exists(charts.REPO + "year_ledger_paired.csv") else ""
+FIG_GAUGE = charts.fig_gauge()
 _pd = {
     (r["framework"], r["impact"]): r
     for r in csv.DictReader(open(charts.REPO + "year_ledger_paired.csv"))
@@ -342,40 +346,18 @@ _cs = {
     if r["column"] == "grrr_2026" and r["impact"] == "emdat_basin"
 }
 _rt = {r["framework"]: r for r in csv.DictReader(open(charts.REPO + "year_ledger_rates.csv"))}
-SCORE = [  # framework key, gauge-test verdict (from step 2), basin status, forecast-proxy status
-    (
-        "Nigeria 2026",
-        "mixed by station: peak correlation up at three gauges, down at one",
-        "Flood Hub gauges, known",
-        "licensed to lead 7 on the main stem",
-    ),
-    (
-        "Somalia",
-        "better: closer tracking and more RP3 episodes caught at every gauge than GloFAS v5",
-        "Flood Hub gauges, known",
-        "licensed to lead 7",
-    ),
-    (
-        "Nepal 2025 (Chatara)",
-        "same: 2 of 9 DHM crossings for both, all models poor at Chatara",
-        "Flood Hub gauge, known",
-        "not licensed past lead 2",
-    ),
-    (
-        "Chad 2025",
-        "better: 4 of 5 observed flood years against GloFAS v4's 3, same 31-day timing",
-        "largest river within 10 km, unconfirmed",
-        "licensed to lead 7",
-    ),
+SCORE = [  # framework key, basin status, forecast-proxy status
+    ("Nigeria 2026", "Flood Hub gauges, known", "licensed to lead 7 on the main stem"),
+    ("Somalia", "Flood Hub gauges, known", "licensed to lead 7"),
+    ("Nepal 2025 (Chatara)", "Flood Hub gauge, known", "not licensed past lead 2"),
+    ("Chad 2025", "largest river within 10 km, unconfirmed", "licensed to lead 7"),
     (
         "Bangladesh 2025 (Bahadurabad)",
-        "same: 3 of 7 FFWC severe floods for both, more false alarms on 2026",
         "largest river within 10 km, unconfirmed",
         "licensed to lead 7",
     ),
     (
         "Niger 2025",
-        "not applicable: the trigger is the gauge itself",
         "largest river within 10 km, 2-yr flow implausible",
         "no forecast in the trigger",
     ),
@@ -401,12 +383,14 @@ def _cell(r):
 
 
 score_rows = ""
-for fw, gauge, basin, proxy in SCORE:
+for fw, basin, proxy in SCORE:
+    gv, gd = GV[fw]
+    gcls = {"higher": "ok", "lower": "warn", "same": "ok"}.get(gv, "")
     e, c = _pd[(fw, "emdat_basin")], _pd[(fw, "cerf_flood_usd")]
     v, cls = _verdict(fw)
     yrs = f"{_cs[fw]['window_start'][:4]}–{_cs[fw]['window_end'][:4]}" if _cs.get(fw) else ""
     aa = (_cs[fw]["aa_years_excluded"] or "none").replace(",", ", ") if _cs.get(fw) else ""
-    score_rows += f"<tr><td class='fw'>{fw.replace(' (Chatara)', '').replace(' (Bahadurabad)', '')}</td><td>{_rt[fw]['incumbent_label']}</td><td>{gauge}</td><td class='num'>{_cell(e)}</td><td class='num'>{_cell(c)}</td><td class='{cls}'><b>{v}</b></td><td style='font-size:12px;color:var(--muted)'>{yrs}, AA out: {aa}; {basin}; {proxy}; hindcast</td></tr>"
+    score_rows += f"<tr><td class='fw'>{fw.replace(' (Chatara)', '').replace(' (Bahadurabad)', '')}</td><td>{_rt[fw]['incumbent_label']}</td><td class='{gcls}'><b>{gv}</b><br><span style='font-size:12px;color:var(--muted)'>{gd}</span></td><td class='num'>{_cell(e)}</td><td class='num'>{_cell(c)}</td><td class='{cls}'><b>{v}</b></td><td style='font-size:12px;color:var(--muted)'>{yrs}, AA out: {aa}; {basin}; {proxy}; hindcast</td></tr>"
 pe, pc = _pd[("All frameworks", "emdat_basin")], _pd[("All frameworks", "cerf_flood_usd")]
 
 
@@ -428,6 +412,29 @@ def _pool(r):
     ), lo <= 0 <= hi
 
 
+def _gauge_clause():
+    short = lambda fw: fw.replace(" (Chatara)", "").replace(" (Bahadurabad)", "")
+    groups = {}
+    for fw, (v, _) in GV.items():
+        if v != "not applicable":
+            groups.setdefault(v, []).append(short(fw))
+    word = {
+        "higher": "higher in",
+        "lower": "lower in",
+        "same": "level in",
+        "mixed by station": "mixed by station in",
+    }
+    parts = [f"{word[v]} {' and '.join(groups[v])}" for v in word if v in groups]
+    rho = [
+        (float(r["rho_grrr_2026"]), float(r["rho_incumbent"]))
+        for r in GAUGE
+        if r.get("rho_grrr_2026") is not None
+    ]
+    up = sum(a > b for a, b in rho)
+    return ", ".join(parts), up, len(rho)
+
+
+gauge_clause, rho_up, rho_n = _gauge_clause()
 pooled_e, _ne = _pool(pe)
 pooled_c, _nc = _pool(pc)
 pooled_noise = {
@@ -505,20 +512,21 @@ a{{color:var(--accent)}} a:focus-visible{{outline:2px solid var(--accent);outlin
 .foot{{margin-top:40px;font-size:13px;color:var(--muted)}}
 </style>
 <main>
-<div class="eyebrow">Google.org grant · Deliverable 1 · floods · working page, updated 5 November 2026, step 2 re-cut around the model each framework ran on</div>
+<div class="eyebrow">Google.org grant · Deliverable 1 · floods · working page, updated 9 November 2026, gauge and impact tests both as a 2x2 against the model each framework ran on</div>
 <h1>Google Flood Benchmark</h1>
 <p class="lede">Benchmarking Google's AI flood forecasts against the models used in the CERF anticipatory action frameworks. The answer so far is at the top; under it, the groundwork on Google's November 2026 release, what each framework actually evaluated and against which record, and the re-run of those evaluations with the new data.</p>
 <nav class="toc"><a href="#answer">The answer so far</a><a href="#groundwork">1. Groundwork</a><a href="#review">2. What each framework evaluated</a><a href="#plan">3. Replication plan</a><a href="#impact">Where the impact data lives</a></nav>
 
 <h2 id="answer">The answer so far: no evidence the 2026 model would have served the frameworks better on the humanitarian record</h2>
-<p>The question is whether Google's November 2026 model would have served each framework better than the model it actually runs on. On the frameworks' own gauge tests (section 3) it is as good or better in four of the five frameworks that run on a model: better in Somalia and Chad, level in Nepal and Bangladesh, mixed by station in Nigeria. Niger's trigger is the gauge itself, so there is no model to compare. On the humanitarian record, EM-DAT people affected in the basin and CERF rapid-response flood funding, it never catches more impact years than the incumbent, and in some frameworks one fewer. Pooled across the six frameworks it catches {pooled_e} EM-DAT impact years of {pe["n_impact_years"]} and {pooled_c} CERF years of {pc["n_impact_years"]}; {pooled_noise}. Counting every framework-year, false alarms included, the picture is: on EM-DAT ({pe["n_years"]} framework-years) it also raises {int(pe["fa_grrr_2026"])} false alarms against the incumbent's {int(pe["fa_incumbent"])}, so its critical success index is level, {float(pe["csi_grrr_2026"]):.2f} against {float(pe["csi_incumbent"]):.2f}; on CERF ({pc["n_years"]} framework-years) false alarms are equal, {int(pc["fa_grrr_2026"])} each, so the index is lower, {float(pc["csi_grrr_2026"]):.2f} against {float(pc["csi_incumbent"]):.2f}, with an interval of [{float(pc["csi_diff_lo"]):+.2f}, {float(pc["csi_diff_hi"]):+.2f}] that only just excludes zero. The CERF record is also the one the incumbents' own forecasts helped shape. These records cannot resolve a difference smaller than about one flood in five. Every number is a hindcast, each model's own reanalysis flagging years, scored against the frameworks' own thresholds, with the framework's anticipatory years removed.</p>
+<p>The question is whether Google's November 2026 model would have served each framework better than the model it actually runs on. On the frameworks' own gauge tests (section 3), each reduced to the same 2x2 on the framework's own observed record, it tracks the record more closely wherever the test reports a correlation ({rho_up} of {rho_n} stations), but once false alarms count its critical success index is {gauge_clause}. Niger's trigger is the gauge itself, so there is no model to compare. On the humanitarian record, EM-DAT people affected in the basin and CERF rapid-response flood funding, it never catches more impact years than the incumbent, and in some frameworks one fewer. Pooled across the six frameworks it catches {pooled_e} EM-DAT impact years of {pe["n_impact_years"]} and {pooled_c} CERF years of {pc["n_impact_years"]}; {pooled_noise}. Counting every framework-year, false alarms included, the picture is: on EM-DAT ({pe["n_years"]} framework-years) it also raises {int(pe["fa_grrr_2026"])} false alarms against the incumbent's {int(pe["fa_incumbent"])}, so its critical success index is level, {float(pe["csi_grrr_2026"]):.2f} against {float(pe["csi_incumbent"]):.2f}; on CERF ({pc["n_years"]} framework-years) false alarms are equal, {int(pc["fa_grrr_2026"])} each, so the index is lower, {float(pc["csi_grrr_2026"]):.2f} against {float(pc["csi_incumbent"]):.2f}, with an interval of [{float(pc["csi_diff_lo"]):+.2f}, {float(pc["csi_diff_hi"]):+.2f}] that only just excludes zero. The CERF record is also the one the incumbents' own forecasts helped shape. These records cannot resolve a difference smaller than about one flood in five. Every number is a hindcast, each model's own reanalysis flagging years, scored against the frameworks' own thresholds, with the framework's anticipatory years removed.</p>
+<figure class="fig">{FIG_GAUGE}</figure>
 <figure class="fig">{FIG_PAIRED}</figure>
 <div class="wrap"><table class="plan">
-<tr><th>Framework</th><th>Runs on</th><th>Gauge test, 2026 vs incumbent (section 3, step 2)</th><th class="num">EM-DAT basin, 2026 vs incumbent</th><th class="num">CERF rapid response, 2026 vs incumbent</th><th>Impact verdict</th><th>Window and confidence</th></tr>
+<tr><th>Framework</th><th>Runs on</th><th>Gauge test, CSI 2026 vs incumbent (section 3)</th><th class="num">EM-DAT basin, 2026 vs incumbent</th><th class="num">CERF rapid response, 2026 vs incumbent</th><th>Impact verdict</th><th>Window and confidence</th></tr>
 {score_rows}
 </table></div>
-<p><strong>How to read the verdict.</strong> The verdict is on the critical success index (CSI, impact years caught over caught plus missed plus false alarms) of each measure over the framework-years of the comparison window: "same" when both models flag the same years; "lower" when the 2026 model's CSI is below the incumbent's on at least one measure and above on none; "higher" the reverse; "mixed" when one measure goes each way; "cannot tell" when the basin mapping is in doubt. Cells read: impact years caught (2026 vs incumbent, of N), then false alarms and CSI. The window is the baseline years both models cover, minus the years the framework's own anticipatory allocation was made (that allocation is the framework firing). Impact years are the years whose EM-DAT or CERF amount reaches the framework's own return-period level on that window. Confidence names three things: whether the Google basin is a known Flood Hub gauge or a nearest-river guess, whether the reanalysis stands in for the forecast at the framework's lead (step 1), and that this is a hindcast rather than a forecast-at-lead test.</p>
-<p><strong>What would change the answer.</strong> Confirming the three guessed basins (Niamey first); the forecast-level pass on the 2016 to 2025 reforecast overlap at each framework's action lead, which is the question as asked; and a basin-level impact record such as FloodScan exposure, which is deferred. Until then the defensible statement is non-inferiority on the gauge tests and no evidence of superiority on the humanitarian record.</p>
+<p><strong>How to read the verdict.</strong> The verdict is on the critical success index (CSI, impact years caught over caught plus missed plus false alarms) of each measure over the framework-years of the comparison window: "same" when both models flag the same years; "lower" when the 2026 model's CSI is below the incumbent's on at least one measure and above on none; "higher" the reverse; "mixed" when one measure goes each way; "cannot tell" when the basin mapping is in doubt. Cells read: impact years caught (2026 vs incumbent, of N), then false alarms and CSI. The gauge column is the same 2x2 on each framework's own observed record from section 3 (first figure), verdict on CSI, "mixed by station" where the framework's stations disagree; it has no pooled row because the event units differ. The window is the baseline years both models cover, minus the years the framework's own anticipatory allocation was made (that allocation is the framework firing). Impact years are the years whose EM-DAT or CERF amount reaches the framework's own return-period level on that window. Confidence names three things: whether the Google basin is a known Flood Hub gauge or a nearest-river guess, whether the reanalysis stands in for the forecast at the framework's lead (step 1), and that this is a hindcast rather than a forecast-at-lead test.</p>
+<p><strong>What would change the answer.</strong> Confirming the three guessed basins (Niamey first); the forecast-level pass on the 2016 to 2025 reforecast overlap at each framework's action lead, which is the question as asked; and a basin-level impact record such as FloodScan exposure, which is deferred. Until then the defensible statement is closer tracking of the observed record, no consistent gain once false alarms count, and no evidence of superiority on the humanitarian record.</p>
 
 <h2 id="groundwork">1. Groundwork: Google's November 2026 release has a basin in every CERF country</h2>
 <p>What was verified in the new <code>distributed_model_2026_11</code> release before the benchmark uses it, read anonymously from <code>gs://flood-forecasting</code>. The question that remains is not whether a basin exists but whether the one at each trigger station is any good.</p>
@@ -640,7 +648,7 @@ a{{color:var(--accent)}} a:focus-visible{{outline:2px solid var(--accent);outlin
 <tr><th>Station</th><th>RP</th><th>Source</th><th>convention</th><th>published</th><th class="num">2023: matched, false alarms</th><th class="num">2026: matched, false alarms</th></tr>
 {npl_rows}
 </table></div></details>
-<div class="finding"><strong>Nepal.</strong> The 2023 column gives GRRR 6 of 7 at Chisapani at RP2, the KB number, and 4 of 7 at RP5, the technical note's number: the two published figures were one test at two return periods. On the 2026 release Chisapani drops to 5 of 7 at RP2 and 2 of 7 at RP5 with false alarms unchanged, and Chatara, the live trigger station, is poor for every model including GloFAS v4 (1 of 9 at RP2, 0 of 9 at RP5). Against GloFAS v4, the model the framework runs on, GRRR 2026 is level at Chatara and one crossing better at Chisapani RP2 with fewer false alarms. With step 1's finding that Nepal's reanalysis does not stand in for its forecast beyond lead 2, this test says little about a trigger there.</div>
+<div class="finding"><strong>Nepal.</strong> The 2023 column gives GRRR 6 of 7 at Chisapani at RP2, the KB number, and 4 of 7 at RP5, the technical note's number: the two published figures were one test at two return periods. On the 2026 release Chisapani drops to 5 of 7 at RP2 and 2 of 7 at RP5 with false alarms unchanged, and Chatara, the live trigger station, is poor for every model including GloFAS v4 (2 of 9 crossings at RP2, 1 of 9 at RP5, for both). Against GloFAS v4, the model the framework runs on, GRRR 2026 matches the same crossings at Chatara with more false alarms (5 against 1 at the 2025 trigger's RP5) and is level at Chisapani RP2 with the same false alarms. With step 1's finding that Nepal's reanalysis does not stand in for its forecast beyond lead 2, this test says little about a trigger there.</div>
 <h3 style="font-size:16px">Nigeria: GRRR reanalysis against GRDC observed discharge, wet season Jul to Nov</h3>
 <figure class="fig">{FIG_NGA}</figure>
 <details><summary>Show the numbers</summary>
@@ -648,7 +656,7 @@ a{{color:var(--accent)}} a:focus-visible{{outline:2px solid var(--accent);outlin
 <tr><th>Station</th><th>basin</th><th class="num">years</th><th class="num">daily ρ 23 / 26</th><th class="num">annual-peak ρ pub / 23 / 26</th><th class="num">3-yr hits/FA/misses 23 → 26</th><th class="num">F1 3-yr 23 / 26</th><th class="num">F1 5-yr 23 / 26</th></tr>
 {nga_rows}
 </table></div></details>
-<div class="finding"><strong>Nigeria.</strong> The 2023 column gives the published 0.76 annual-peak correlation at Yidere Bode. On the 2026 release the annual-peak correlation rises at Yidere Bode, Lokoja and Kende and falls at Makurdi; 3-yr exceedance agreement improves at Lokoja and Kende and worsens at Yidere Bode and Makurdi. Mixed on 16 to 38 years per station, no single direction. Five of nine GRDC stations pass the completeness filters; Wuroboki, the 2025 trigger gauge, has only 8 valid years.</div>
+<div class="finding"><strong>Nigeria.</strong> The 2023 column gives the published 0.76 annual-peak correlation at Yidere Bode. Both releases are scored on the years both cover, 1981 to 2023. On the 2026 release the annual-peak correlation rises at Yidere Bode, Lokoja and Kende and falls at Makurdi; 3-yr exceedance agreement improves at Lokoja, is unchanged at Kende and worsens at Yidere Bode and Makurdi. Mixed on 16 to 37 years per station, no single direction. Four of nine GRDC stations pass the completeness filters; Wuroboki, the 2025 trigger gauge, has fewer than 15 valid years.</div>
 <h3 style="font-size:16px">Chad: annual peaks at N'Djamena against the DRE observed level, 2003 to 2022</h3>
 <figure class="fig">{FIG_TCD}</figure>
 <details><summary>Show the numbers</summary>
