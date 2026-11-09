@@ -1109,7 +1109,7 @@ def fig_gauge():
                 f"<text x='{label_w + 10}' y='{cy + 4:.1f}' fill='{QUIET}'>{esc(r['test'])}: no model to compare. {esc(r['incumbent'])}.</text>"
             )
             continue
-        inc_col = C23 if r["incumbent"].startswith("GRRR") else INC
+        inc_col = INC
         for p, (dk, _) in enumerate(panels):
             x0 = label_w + 10 + p * (pw + gap)
             sx = lambda t, x0=x0: x0 + t * pw
@@ -1133,13 +1133,10 @@ def fig_gauge():
         )
     ly = y + 2 + rh * len(rows) + 40
     out.append(
-        f"<circle cx='16' cy='{ly - 4}' r='4.5' fill='{INC}'/><text x='26' y='{ly}' fill='{QUIET}'>ran on: GloFAS v4 or v5</text>"
+        f"<circle cx='16' cy='{ly - 4}' r='4.5' fill='{INC}'/><text x='26' y='{ly}' fill='{QUIET}'>the model the framework runs on (GloFAS v4 or v5; Nigeria's is Google's 2023 bucket)</text>"
     )
     out.append(
-        f"<circle cx='190' cy='{ly - 4}' r='4.5' fill='{C23}'/><text x='200' y='{ly}' fill='{QUIET}'>ran on: GRRR 2023 bucket (Nigeria)</text>"
-    )
-    out.append(
-        f"<circle cx='420' cy='{ly - 4}' r='4.5' fill='{C26}'/><text x='430' y='{ly}' fill='{QUIET}'>GRRR November 2026</text>"
+        f"<circle cx='470' cy='{ly - 4}' r='4.5' fill='{C26}'/><text x='480' y='{ly}' fill='{QUIET}'>GRRR November 2026</text>"
     )
     out.append(
         f"<text x='8' y='{ly + 18}' fill='{QUIET}'>Tests: Somalia RP3 episodes at each SWALIM gauge 2002–2023, ρ the mean of Gu and Deyr daily ρ against the river's reference gauge; Nigeria 3-yr peak years and annual-peak ρ against GRDC, 1981–2023; Nepal DHM crossings at Chatara,</text>"
