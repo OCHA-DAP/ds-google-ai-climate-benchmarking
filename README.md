@@ -49,7 +49,8 @@ about Google's November 2026 data release.
 | `scripts/rescore_bgd.py` | Bangladesh: GRRR and GloFAS v4 reanalysis events above RP5 against FFWC severe floods (danger level + 0.85 m for 3 days) at Bahadurabad |
 | `scripts/incumbents.py` | The model each framework actually ran on, as daily reanalysis series: GloFAS v4 at Bahadurabad, Chatara/Chisapani and N'Djamena, GloFAS v5 at the Somali gauges; labels and trigger-source lines per framework |
 | `scripts/fetch_glofas_recent.py` | Extends each incumbent GloFAS series past the spoke copy's end from the Copernicus Early Warning Data Store (same version, same cell; requests queue there for hours, so it submits all then polls). `outputs/glofas_recent.parquet`, appended by `incumbents.py` |
-| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, the model it ran on, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF flood allocations, plus each column's correlation with them. `outputs/year_ledger.csv`, `year_ledger_rates.csv`, `year_ledger_impact_corr.csv` |
+| `scripts/page/` | The working page: `build.py` aggregates the step-1 coverage outputs (`data.py`), adds the incumbent legs to the rescore summary (`summary.py`), draws every figure as inline SVG from the `outputs/` files (`charts.py`) and writes `outputs/page/index.html`, which is published as the Claude artifact. Decision: `docs/decisions/0002` |
+| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, the model it ran on, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF flood allocations, plus each column's correlation with them and, for the key pair, the 2x2 over framework-years (impact years caught, false alarms, CSI) with bootstrap intervals. `outputs/year_ledger.csv`, `year_ledger_rates.csv`, `year_ledger_impact_corr.csv`, `year_ledger_paired.csv` |
 
 ## Running
 
@@ -67,6 +68,7 @@ uv run scripts/rescore_bgd.py --release 2026                # needs AA_DATA_DIR;
 uv run scripts/rescore_som.py --release glofas_v5           # the Somalia proposal's GloFAS v5 leg
 uv run scripts/fetch_glofas_recent.py                       # needs ~/.cdsapirc; hours of EWDS queue, resumable
 uv run scripts/year_ledger.py                               # needs blob and AA_DATA_DIR; writes outputs/year_ledger.csv
+uv run scripts/page/build.py                                # the working page, outputs/page/index.html, from the outputs above
 ```
 
 The Google data is public (CC-BY-4.0) and read anonymously from

@@ -128,14 +128,14 @@ Observed events from the FFWC record on the shared drive: water level at or abov
 
 ### The paired answer
 
-`outputs/year_ledger_paired.csv`: per framework and impact measure, on the comparison window (baseline years both models of the key pair cover, minus the framework's own anticipatory years), the impact years caught by GRRR 2026 and by the incumbent, their difference, and a bootstrap 90% interval over years; plus the pooled row. 5 Nov 2026:
+`outputs/year_ledger_paired.csv`: per framework and impact measure, the 2x2 of GRRR 2026 against the incumbent over the framework-years of the comparison window (baseline years both models of the key pair cover, minus the framework's own anticipatory years): impact years caught, false alarms (years flagged that were not impact years) and the critical success index, hits / (hits + misses + false alarms), each as a difference with a bootstrap 90% interval over the window years; the pooled row sums the same resamples across frameworks, so its N is framework-years. 9 Nov 2026:
 
-| Measure | 2026 vs incumbent, pooled | difference [90%] | per framework (2026 vs incumbent of N) |
-|---|---|---|---|
-| EM-DAT basin, people affected | 15 vs 17 of 29 | −2 [−7, +3] | NGA 3 v 3 of 6; SOM 3 v 3 of 4; NPL 2 v 2 of 4; TCD 3 v 3 of 5; BGD 2 v 3 of 5; NER 2 v 3 of 5 |
-| CERF rapid response, US$ | 8 vs 12 of 16 | −4 [−7, −1] | NGA 3 v 3 of 3; SOM 2 v 3 of 3; NPL 0 v 1 of 2; TCD 2 v 2 of 2; BGD 0 v 1 of 3; NER 1 v 2 of 3 |
+| Measure | framework-years | impact years caught, 2026 vs incumbent | false alarms, 2026 vs incumbent | CSI, 2026 vs incumbent | per framework |
+|---|---|---|---|---|---|
+| EM-DAT basin, people affected | 140 | 15 vs 17 of 29, -2 [-7, +3] | 15 vs 18, -3 [-10, +5] | 0.34 vs 0.36, -0.02 [-0.14, +0.10] | NGA 3 v 3 of 6, FA 3 v 3; SOM 3 v 3 of 4, FA 3 v 5; NPL 2 v 2 of 4, FA 2 v 2; TCD 3 v 3 of 5, FA 2 v 2; BGD 2 v 3 of 5, FA 2 v 1; NER 2 v 3 of 5, FA 3 v 5 |
+| CERF rapid response, US$ | 101 | 8 vs 12 of 16, -4 [-7, -1] | 14 vs 14, +0 [-7, +6] | 0.27 vs 0.40, -0.13 [-0.25, -0.01] | NGA 3 v 3 of 3, FA 1 v 1; SOM 2 v 3 of 3, FA 4 v 4; NPL 0 v 1 of 2, FA 2 v 3; TCD 2 v 2 of 2, FA 3 v 1; BGD 0 v 1 of 3, FA 1 v 1; NER 1 v 2 of 3, FA 3 v 4 |
 
-The EM-DAT difference is within noise; the CERF one is not, but CERF rapid response is the record the incumbents' own forecasts helped shape (the people allocating were watching GloFAS or Flood Hub), and three of the six rows sit on unconfirmed basins. The defensible statement is non-inferiority on the gauge tests and no evidence of superiority on the humanitarian record; a difference smaller than about one flood in five cannot be resolved on these records. The working page carries this as its top section with a per-framework scorecard.
+On EM-DAT the fewer impact years caught are offset by fewer false alarms and the two models are level on CSI. On CERF the gap stays with equal false alarms, and the CSI interval only just excludes zero; CERF rapid response is also the record the incumbents' own forecasts helped shape (the people allocating were watching GloFAS or Flood Hub), and three of the six rows sit on unconfirmed basins. The defensible statement is non-inferiority on the gauge tests and no evidence of superiority on the humanitarian record; a difference smaller than about one flood in five cannot be resolved on these records. The working page carries this as its top section with a per-framework scorecard.
 
 ## What this says so far
 

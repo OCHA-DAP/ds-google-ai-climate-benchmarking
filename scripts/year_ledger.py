@@ -459,8 +459,10 @@ def impact_stats(
 
     - rho: Spearman of the 0/1 flag against the amount, with a bootstrap 90% interval over years.
     - hits / misses / false_alarms against the impact years, over the window years the column has.
-    Also returns the paired difference, GRRR 2026 minus incumbent in impact years caught, with a
-    bootstrap 90% interval over the window years, per framework and pooled.
+    Also returns the paired 2x2 over the framework-years of the window, GRRR 2026 against the
+    incumbent: impact years caught, false alarms, and the critical success index, each as a
+    difference with a bootstrap 90% interval over the window years, per framework and pooled
+    (the pooled row sums the same resamples across frameworks).
     """
     rng = rng or np.random.default_rng(0)
     rows, paired = [], []
@@ -511,52 +513,91 @@ def impact_stats(
                         "aa_years_excluded": ",".join(str(v) for v in sorted(aa_out)),
                     }
                 )
-            # paired difference on the window, both columns present on every window year
+            # paired 2x2 on the window, both columns present on every window year: the point
+            # counts and BOOT resamples of the framework-years, kept per framework so the pooled
+            # row sums the same resamples across frameworks
             inc = w["incumbent"].astype(float).values
             g26 = w["grrr_2026"].astype(float).values
             isimp = np.array([int(y) in impact_years for y in w.index])
-            diff = int(((g26 == 1) & isimp).sum() - ((inc == 1) & isimp).sum())
-            bs = []
-            for _ in range(BOOT):
-                i = rng.integers(0, len(w), len(w))
-                bs.append(int(((g26[i] == 1) & isimp[i]).sum() - ((inc[i] == 1) & isimp[i]).sum()))
-            pooled[imp].append(np.array(bs))
+            counts = _counts(inc, g26, isimp)
+            reps = np.array(
+                [
+                    _counts(inc[i], g26[i], isimp[i])
+                    for i in (rng.integers(0, len(w), len(w)) for _ in range(BOOT))
+                ]
+            )
+            pooled[imp].append((counts, reps))
             paired.append(
-                {
-                    "framework": fw,
-                    "impact": imp,
-                    "n_years": len(w),
-                    "n_impact_years": int(isimp.sum()),
-                    "hits_incumbent": int(((inc == 1) & isimp).sum()),
-                    "hits_grrr_2026": int(((g26 == 1) & isimp).sum()),
-                    "fa_incumbent": int(((inc == 1) & ~isimp).sum()),
-                    "fa_grrr_2026": int(((g26 == 1) & ~isimp).sum()),
-                    "diff": diff,
-                    "diff_lo": float(np.percentile(bs, 5)),
-                    "diff_hi": float(np.percentile(bs, 95)),
-                }
+                {"framework": fw, "impact": imp, "n_years": len(w), **_paired_row(counts, reps)}
             )
     for imp, parts in pooled.items():
         if not parts:
             continue
-        tot = np.sum(parts, axis=0)
         sub = [p_ for p_ in paired if p_["impact"] == imp]
         paired.append(
             {
                 "framework": "All frameworks",
                 "impact": imp,
                 "n_years": sum(p_["n_years"] for p_ in sub),
-                "n_impact_years": sum(p_["n_impact_years"] for p_ in sub),
-                "hits_incumbent": sum(p_["hits_incumbent"] for p_ in sub),
-                "hits_grrr_2026": sum(p_["hits_grrr_2026"] for p_ in sub),
-                "fa_incumbent": sum(p_["fa_incumbent"] for p_ in sub),
-                "fa_grrr_2026": sum(p_["fa_grrr_2026"] for p_ in sub),
-                "diff": sum(p_["diff"] for p_ in sub),
-                "diff_lo": float(np.percentile(tot, 5)),
-                "diff_hi": float(np.percentile(tot, 95)),
+                **_paired_row(
+                    np.sum([c for c, _ in parts], axis=0), np.sum([r for _, r in parts], axis=0)
+                ),
             }
         )
     return pd.DataFrame(rows), pd.DataFrame(paired)
+
+
+def _counts(inc, g26, isimp) -> np.ndarray:
+    """Hits, misses, false alarms for the incumbent (0-2) then GRRR 2026 (3-5) over the years."""
+    return np.array(
+        [
+            ((inc == 1) & isimp).sum(),
+            ((inc != 1) & isimp).sum(),
+            ((inc == 1) & ~isimp).sum(),
+            ((g26 == 1) & isimp).sum(),
+            ((g26 != 1) & isimp).sum(),
+            ((g26 == 1) & ~isimp).sum(),
+        ]
+    )
+
+
+def _csi(c: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Critical success index, hits / (hits + misses + false alarms), incumbent then GRRR 2026.
+    NaN for a resample with no impact year and no flag."""
+    with np.errstate(invalid="ignore", divide="ignore"):
+        inc = c[..., 0] / (c[..., 0] + c[..., 1] + c[..., 2])
+        g26 = c[..., 3] / (c[..., 3] + c[..., 4] + c[..., 5])
+    return inc, g26
+
+
+def _paired_row(c: np.ndarray, reps: np.ndarray) -> dict:
+    """Point counts plus bootstrap 90% intervals for three paired differences, GRRR 2026 minus
+    incumbent: impact years caught, false alarms, CSI."""
+    ci, cg = _csi(c)
+    ri, rg = _csi(reps)
+
+    def pct(a, q):
+        return float(np.nanpercentile(a, q))
+
+    d_hits, d_fa, d_csi = reps[:, 3] - reps[:, 0], reps[:, 5] - reps[:, 2], rg - ri
+    return {
+        "n_impact_years": int(c[0] + c[1]),
+        "hits_incumbent": int(c[0]),
+        "hits_grrr_2026": int(c[3]),
+        "fa_incumbent": int(c[2]),
+        "fa_grrr_2026": int(c[5]),
+        "diff": int(c[3] - c[0]),
+        "diff_lo": pct(d_hits, 5),
+        "diff_hi": pct(d_hits, 95),
+        "fa_diff": int(c[5] - c[2]),
+        "fa_diff_lo": pct(d_fa, 5),
+        "fa_diff_hi": pct(d_fa, 95),
+        "csi_incumbent": float(ci),
+        "csi_grrr_2026": float(cg),
+        "csi_diff": float(cg - ci),
+        "csi_diff_lo": pct(d_csi, 5),
+        "csi_diff_hi": pct(d_csi, 95),
+    }
 
 
 def main() -> int:
