@@ -41,6 +41,16 @@ about Google's November 2026 data release.
 | `scripts/stations.py` | The trigger stations of the flood frameworks, one entry per station and season, with the Flood Hub id or coordinates each framework uses |
 | `scripts/map_stations.py` | Map each station to a sub-basin of the release: identity for Flood Hub ids (they share the HydroBASINS numbering), largest river within 10 km for real gauges, flagged for a human check |
 | `scripts/proxy_check.py` | Is the reanalysis a proxy for the reforecast? Per station and lead 1 to 10: daily and seasonal-peak Spearman, bootstrap interval, reforecast-to-reanalysis ratio above the 2-yr level. Results in `docs/proxy-check-2026-11.md` |
+| `scripts/grrr_releases.py` | One loader for both public releases (2023 bucket, November 2026), so a re-score runs the same code on each |
+| `scripts/rescore_som.py` | Somalia: GRRR reanalysis against the SWALIM gauges, best-lag daily Spearman and RP3 episode POD/FAR, reproducing `ds-aa-som-floods` notebooks 02 and 06 |
+| `scripts/rescore_npl.py` | Nepal: model exceedance events against DHM danger-level crossings at RP2 and RP5, reproducing `ds-aa-npl-flooding` book chapter 05, GloFAS v4 included |
+| `scripts/rescore_nga.py` | Nigeria: GRRR reanalysis against GRDC observed discharge, daily and annual-peak Spearman and 3/5-yr exceedance F1, reproducing `ds-aa-nga-flooding` notebook 08, both releases on the years both cover (1981–2023). Results of all three in `docs/rescore-2026-11.md` |
+| `scripts/rescore_tcd.py` | Chad: model annual peaks at N'Djamena against the DRE observed level, 4-yr exceedance years, peak correlation and days early, reproducing the 2025 document's annex; GloFAS v4 included |
+| `scripts/rescore_bgd.py` | Bangladesh: GRRR and GloFAS v4 reanalysis events above RP5 against FFWC severe floods (danger level + 0.85 m for 3 days) at Bahadurabad |
+| `scripts/incumbents.py` | The model each framework actually ran on, as daily reanalysis series: GloFAS v4 at Bahadurabad, Chatara/Chisapani and N'Djamena, GloFAS v5 at the Somali gauges; labels and trigger-source lines per framework |
+| `scripts/fetch_glofas_recent.py` | Extends each incumbent GloFAS series past the spoke copy's end from the Copernicus Early Warning Data Store (same version, same cell; requests queue there for hours, so it submits all then polls). `outputs/glofas_recent.parquet`, appended by `incumbents.py` |
+| `scripts/page/` | The working page: `build.py` aggregates the step-1 coverage outputs (`data.py`), adds the incumbent legs to the rescore summary (`summary.py`), draws every figure as inline SVG from the `outputs/` files (`charts.py`) and writes `outputs/page/index.html`, which is published as the Claude artifact. Decision: `docs/decisions/0002`; `gauge.py` reduces each framework's own gauge test to the same 2x2 as the impact side (`outputs/rescore_gauge_2x2.csv`) |
+| `scripts/year_ledger.py` | Year by year per framework: the framework's backtest, the model it ran on, each Google release's reanalysis at the framework's level, the observed record, EM-DAT affected and CERF flood allocations, plus each column's correlation with them and, for the key pair, the 2x2 over framework-years (impact years caught, false alarms, CSI) with bootstrap intervals. `outputs/year_ledger.csv`, `year_ledger_rates.csv`, `year_ledger_impact_corr.csv`, `year_ledger_paired.csv` |
 
 ## Running
 
@@ -50,6 +60,15 @@ uv run scripts/grrr_2026_11.py subhybas_1121902040          # one basin, prints 
 uv run scripts/check_grrr_coverage.py --iso NGA SOM NPL     # coverage for named countries, writes outputs/
 uv run scripts/map_stations.py                              # outputs/stations_mapped.csv
 uv run scripts/proxy_check.py                               # outputs/proxy_check.csv, needs the mapping first
+uv run scripts/rescore_npl.py --release 2026                # also 2023; needs AA_DATA_DIR
+uv run scripts/rescore_som.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
+uv run scripts/rescore_nga.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
+uv run scripts/rescore_tcd.py --release 2026                # needs DSCI_AZ_BLOB_DEV_SAS
+uv run scripts/rescore_bgd.py --release 2026                # needs AA_DATA_DIR; also runs the GloFAS v4 leg
+uv run scripts/rescore_som.py --release glofas_v5           # the Somalia proposal's GloFAS v5 leg
+uv run scripts/fetch_glofas_recent.py                       # needs ~/.cdsapirc; hours of EWDS queue, resumable
+uv run scripts/year_ledger.py                               # needs blob and AA_DATA_DIR; writes outputs/year_ledger.csv
+uv run scripts/page/build.py                                # the working page, outputs/page/index.html, from the outputs above
 ```
 
 The Google data is public (CC-BY-4.0) and read anonymously from
