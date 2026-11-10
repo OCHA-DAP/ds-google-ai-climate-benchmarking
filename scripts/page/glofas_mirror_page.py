@@ -171,7 +171,7 @@ dl{{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:14
 {tile(f"${by['cool_lrs_usd_per_month_47yr']}", "per month, Cool tier, 47 years")}
 {tile(f"{rc['one_cell_history_s_median']} s", "one point, loaded history, from blob")}
 </div>
-<div class="verdict"><p>{"Every check passed. The store reads back exactly what the spokes hold, the land mask is where it should be, and a point history is a sub-second read." if allpass else "Some checks failed; see the table. Nothing should be scheduled on this layout until they pass."}</p></div>
+<div class="verdict"><p>{"Every check passed. The store reads back exactly what the spokes hold, the land mask is where it should be, and one point's history reads in a fraction of a second per five-year shard column (about two seconds for the full 47 years)." if allpass else "Some checks failed; see the table. Nothing should be scheduled on this layout until they pass."}</p></div>
 
 <h2>What the store is</h2>
 <dl>
@@ -208,6 +208,7 @@ dl{{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:14
 <tr><td>q.zarr on blob</td><td>{by["q.zarr"] / 1e9:.2f} GB for {len(years)} years</td></tr>
 <tr><td>bronze on blob</td><td>{by["bronze"] / 1e9:.2f} GB</td></tr>
 <tr><td>static (ECMWF upstream area, drain direction) and index</td><td>{(by["static"] + by["cells.parquet"]) / 1e6:.0f} MB</td></tr>
+<tr><td>what the 2,000-cell read says</td><td>a cell list across all time touches a shard per 64 cells; bulk extraction (many cells) should read whole shards, not cell lists</td></tr>
 <tr><td>47 years, projected</td><td>{by["q_zarr_47yr_gb_projection"]} GB store, {by["bronze_per_year_gb"] * 47:.0f} GB bronze; ${by["cool_lrs_usd_per_month_47yr"]} a month with bronze in the Archive tier</td></tr>
 </tbody></table></div>
 
@@ -216,13 +217,25 @@ dl{{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:14
 store = zarr.storage.FsspecStore.from_url("abfs://global/glofas/v4/reanalysis/q.zarr",
     storage_options={{"account_name": "imb0chd0dev", "sas_token": os.environ["DSCI_AZ_BLOB_DEV_SAS"]}})
 g = zarr.open_group(store, mode="r")
-cells = pd.read_parquet("cells.parquet")              # from the same prefix: cell, lat, lon, uparea_km2, downstream_cell
+import io
+from azure.storage.blob import ContainerClient
+cc = ContainerClient("https://imb0chd0dev.blob.core.windows.net", "global", credential=os.environ["DSCI_AZ_BLOB_DEV_SAS"])
+cells = pd.read_parquet(io.BytesIO(cc.get_blob_client("glofas/v4/reanalysis/cells.parquet").download_blob().readall()))
 cell = cells.query("abs(lat - 12.125) < 1e-6 and abs(lon - 15.025) < 1e-6").cell.item()   # N'Djamena's GloFAS cell
 q = pd.Series(g["q"][cell, :], index=pd.Timestamp("1979-01-01") + pd.to_timedelta(g["time"][:], unit="D"))
 # q is stamped at the END of each 24 h window; subtract one day for a start-of-day convention</pre>
 
+<h2>Findings from this run</h2>
+<ul>
+<li><b>Sharded Zarr v3 on Azure Blob needs the shard index at the start.</b> Zarr's default puts each shard's chunk index at its end and reads it with a suffix byte range; Azure Blob serves none, adlfs passes the request through, and every partial read fails with "Required Content-Range response header is missing". Tested on two small arrays with the same code and credentials: index at the end fails, index at the start reads. The first build of this store had to be redone for that one setting, from bronze, with no new EWDS request. Unsharded Zarr (the team's IMERG and CMA stores) is not affected. Rule for any sharded Zarr on the team's blob: <code>index_location="start"</code>.</li>
+<li><b>The Bangladesh spoke's per-year GloFAS files carry a boundary-day artefact.</b> At Bahadurabad the mirror equals the spoke copy on every day except 2001-01-01 and 2022-12-31, where the spoke's yearly file holds the neighbouring day's value (its 31 Dec 2022 is EWDS's 1 Jan 2023). The mirror is internally consistent there. Harmless for a flood threshold, but it is the incumbent series the benchmark reads, so the framework owner should know.</li>
+<li><b>Appending into a filled shard column costs more.</b> 2023 took {st["years_loaded"]["2023"]["seconds"] // 60} minutes against {st["years_loaded"]["2022"]["seconds"] // 60} for 2022 because it rewrote the shards 2022 had already filled. In the backfill the second to fifth year of every five-year column pays this, so plan on about ten minutes a year, not six.</li>
+<li><b>Storage came in well under the gridded estimate.</b> The probe on the full grid projected about 107 GB for all land cells; the (cell, time) layout compresses along time and measures {by["q_zarr_per_year_gb"]} GB a year on three real years, {by["q_zarr_47yr_gb_projection"]} GB for the record.</li>
+<li><b>The EWDS key is shared.</b> The requests submitted from a laptop key were visible to the Databricks job's key without resubmission, so the key in use is the same one the daily Nigeria and Somalia monitoring queues on. A second key does not exist yet.</li>
+</ul>
+
 <h2>Before the full run</h2>
-<p>The backfill is 47 whole-globe requests, about {by["bronze_per_year_gb"] * 47:.0f} GB through EWDS, loaded one year at a time on the single-node job policy. Open before scheduling it: the EWDS requests share the team key's queue with the daily Nigeria and Somalia runs, so the run belongs off-season or on a second key; 2025 comes from the intermediate product where the consolidated one ends; v5 is a sibling prefix when it goes operational; and the code should move from the benchmark repo to its own pipeline with a KB page. Design and rejected layouts: ADR 0003 in the benchmark repo.</p>
+<p>The backfill is 47 whole-globe requests, about {by["bronze_per_year_gb"] * 47:.0f} GB through EWDS, loaded one year at a time on the single-node job policy. Open before scheduling it: a second Copernicus key, or an off-season slot, so the 47 requests do not sit in the monitoring runs' queue; a dry run of the loader on a synthetic band before the job starts, so a cluster is never the first place a code error shows; an instance pool, since tonight's six cluster starts cost more than the compute; 2025 comes from the intermediate product where the consolidated one ends; v5 is a sibling prefix when it goes operational; and the code should move from the benchmark repo to its own pipeline with a KB page. Design and rejected layouts: ADR 0003 in the benchmark repo.</p>
 </main>
 """
     (OUT / "index.html").write_text(html)
