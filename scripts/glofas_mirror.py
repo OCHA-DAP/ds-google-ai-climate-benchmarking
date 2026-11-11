@@ -61,8 +61,10 @@ import datetime as dt
 import io
 import json
 import os
+import pathlib
 import resource
 import sys
+import tempfile
 import time
 
 import netCDF4
@@ -110,6 +112,19 @@ def _blob_bytes(name: str) -> bytes:
     return (
         _container().get_blob_client(f"{PREFIX}/{name}").download_blob(max_concurrency=8).readall()
     )
+
+
+def _blob_to_disk(name: str) -> pathlib.Path:
+    """Download a blob to the node's local disk (Databricks: /local_disk0) and return the path."""
+    base = pathlib.Path("/local_disk0/tmp") if pathlib.Path("/local_disk0").is_dir() else None
+    if base is not None:
+        base.mkdir(parents=True, exist_ok=True)
+    fd, path = tempfile.mkstemp(suffix=pathlib.Path(name).suffix, dir=base)
+    with os.fdopen(fd, "wb") as f:
+        _container().get_blob_client(f"{PREFIX}/{name}").download_blob(max_concurrency=8).readinto(
+            f
+        )
+    return pathlib.Path(path)
 
 
 def _blob_exists(name: str) -> bool:
@@ -548,7 +563,10 @@ def cmd_load(years: list[int]) -> None:
         if str(y) in loaded:
             print(f"{y}: already loaded ({loaded[str(y)]['loaded_at']}), skipping")
             continue
-        nc = _open_nc(_blob_bytes(f"bronze/glofas_v4_consolidated_{y}.nc"))
+        # from local disk, not memory: the 2.4 GB file held in RAM for the whole load was the
+        # bulk of the 7.7 GB that hung the 14 GB driver on 11 Nov 2026 (run 586864369657320)
+        nc_path = _blob_to_disk(f"bronze/glofas_v4_consolidated_{y}.nc")
+        nc = netCDF4.Dataset(nc_path, mode="r")
         var = next(v for v in nc.variables if nc[v].ndim == 3)
         v = nc[var]
         tv = nc[v.dimensions[0]]
@@ -600,13 +618,15 @@ def cmd_load(years: list[int]) -> None:
                     f"(NaN on land {nan_on_land}, finite off land {finite_off_land}); nothing written for this year"
                 )
             if c1 > c0:
-                q[c0:c1, t0 : t0 + len(days)] = np.ascontiguousarray(block[:, band_land].T)
+                # index the (rows, cols, T) view so the (cells, T) result is one copy, not two
+                q[c0:c1, t0 : t0 + len(days)] = block.transpose(1, 2, 0)[band_land]
             print(
                 f"  {y} rows {r0:4d}-{r1:4d}: cells {c0:,}-{c1:,} written; rss {_rss_gb():.1f} GB",
                 flush=True,
             )
             del block, fin
         nc.close()
+        nc_path.unlink()
         rec = {
             "days": len(days),
             "first": str(times[0].date()),
