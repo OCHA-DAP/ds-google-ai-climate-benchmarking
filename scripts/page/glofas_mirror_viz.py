@@ -166,7 +166,7 @@ def section(snap: dict) -> str:
 <p>Every land cell carries the area that drains into it, <code>uparea_km2</code> in the index, summed over the flow-direction map from that cell up to the ridges. It says nothing about any gauge: a cell on the Jamuna holds about a million km², a hillslope cell holds the cell's own 25 km². Keeping only the cells at or above a threshold keeps the rivers and drops the slopes; this is the subset a reforecast mirror would hold. Each {nw["coarse_deg"]}° square below is coloured by the largest upstream area among its {round(nw["coarse_deg"] / 0.05) ** 2} fine cells, and stays lit while any one of them clears the threshold, so the picture overstates what is kept and the count beside the slider is the exact figure from the index. Move the slider.</p>
 <div class="viz" id="netviz"><div class="bar"><label>keep cells with upstream area ≥ <span class="num" id="netthr"></span> km² <input type="range" id="netrange" min="0" max="{len(nw["thresholds"]) - 1}" step="1" value="3"></label><span id="netout"></span></div>
 <canvas id="net" width="{nw["cols"]}" height="{nw["rows"]}"></canvas><div class="tip"></div>
-<p class="sub">Store sizes are for a reforecast store of every issue date, 11 members and leads 1 to 15 at the reanalysis store's measured compression, and for the reanalysis store as built.</p></div>
+<p class="sub">Store sizes are for a reforecast store of every issue date, 11 members and leads 1 to 15 at the reanalysis store's measured compression, priced at the Cool tier, and for the reanalysis store as built. The threshold changes only the store: the EWDS download and the raw files are global at every setting.</p></div>
 
 <h3>{esc(mp["name"])}: the cells, their upstream area, and two days of discharge</h3>
 <p>{mp["rows"]} rows × {mp["cols"]} columns of the grid, {mp["land_cells"]:,} land cells, from latitude {mp["lat"][0]:.3f} to {mp["lat"][1]:.3f} and longitude {mp["lon"][0]:.3f} to {mp["lon"][1]:.3f}. The upstream-area layer is the index alone; the discharge layers are one read of the store for {mp["land_cells"]:,} cells on {mp["dates"][0]} and {mp["dates"][1]} ({mp["read_s"]} s, {mp["chunks_touched"]:,} chunks in {mp["shards_touched"]} shards). The lines trace <code>downstream_cell</code> from {esc(traces)}. The other meaning of upstream is the fourth layer: the {ca["cells"]:,} cells of the box whose downstream chain reaches {esc(ca["to"])}, its catchment as far as the box shows it; the Shabelle's head lies beyond the box in Ethiopia. The slider greys out cells below the threshold on the upstream-area layer. Hover or touch a cell.</p>
@@ -214,7 +214,7 @@ const dayToDate = (t0, i) => {{ const d = new Date(t0 + 'T00:00:00Z'); d.setUTCD
 const N = S.network, TH = N.thresholds, nv = document.getElementById('netviz'), ncv = document.getElementById('net'), ntip = nv.querySelector('.tip');
 const NB = Uint8Array.from(atob(N.max_log10_uparea_u8), ch => ch.charCodeAt(0));
 const nLog = b => N.log_lo + b / N.log_per;   // byte -> log10 km²
-const allCells = N.counts['0'], GB_RF = 1800, GB_RA = 53;   // reforecast leads 1-15 at the reanalysis ratio; the reanalysis store
+const allCells = N.counts['0'], GB_RF = 1786, GB_RA = 53, USD_GB = 0.0143;   // reforecast leads 1-15 at the reanalysis ratio; the reanalysis store; Cool tier per GB-month as priced for it
 const netRange = document.getElementById('netrange');
 function drawNet() {{
   const R = ramp(), ctx = ncv.getContext('2d'), s = 1, thr = TH[+netRange.value], lthr = Math.log10(Math.max(thr, 1)), dim = css('--line');
@@ -226,7 +226,7 @@ function drawNet() {{
   }}
   const k = N.counts[String(thr)], share = k / allCells;
   document.getElementById('netthr').textContent = thr.toLocaleString();
-  document.getElementById('netout').innerHTML = `<span class="num">${{k.toLocaleString()}}</span> cells, ${{(100*share).toFixed(share < 0.1 ? 1 : 0)}}% of land · reforecast store ≈ <span class="num">${{Math.round(GB_RF*share).toLocaleString()}} GB</span> · reanalysis store ≈ <span class="num">${{(GB_RA*share).toFixed(1)}} GB</span>`;
+  document.getElementById('netout').innerHTML = `<span class="num">${{k.toLocaleString()}}</span> cells, ${{(100*share).toFixed(share < 0.1 ? 1 : 0)}}% of land · reforecast store ≈ <span class="num">${{Math.round(GB_RF*share).toLocaleString()}} GB</span>, <span class="num">$${{(GB_RF*share*USD_GB).toFixed(GB_RF*share*USD_GB < 10 ? 1 : 0)}}</span>/month · reanalysis store ≈ <span class="num">${{(GB_RA*share).toFixed(1)}} GB</span>`;
 }}
 netRange.addEventListener('input', drawNet);
 ncv.addEventListener('pointermove', ev => {{
