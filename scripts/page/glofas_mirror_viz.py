@@ -15,6 +15,8 @@ from charts import esc
 CSS = """
 .viz{margin:14px 0;background:var(--panel);border:1px solid var(--line);border-radius:4px;padding:10px 12px 8px;position:relative}
 .viz canvas{width:100%;height:auto;display:block;touch-action:none} #map{max-width:620px}
+.viz input[type=range]{width:150px;vertical-align:middle;accent-color:var(--accent)}
+.viz .num{font-family:var(--mono);color:var(--fg)}
 .viz .bar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:13px;color:var(--muted);margin:0 0 8px}
 .viz button{font:inherit;font-size:13px;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:3px;padding:3px 10px;cursor:pointer}
 .viz button[aria-pressed="true"]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
@@ -140,6 +142,7 @@ def anatomy_svg(an: dict, years_loaded: list[int]) -> str:
 
 def section(snap: dict) -> str:
     an, mp, hs, hm = snap["anatomy"], snap["map"], snap["hydrographs"], snap["heatmap"]
+    nw, ca = snap["network"], snap["map"]["catchment"]
     yl = snap["years_loaded"]
     data = json.dumps(snap, separators=(",", ":")).replace("</", "<\\/")
     st_rows = "".join(
@@ -154,15 +157,22 @@ def section(snap: dict) -> str:
     traces = "; ".join(f"{t['from']} to the outlet, {t['cells']:,} cells" for t in mp["traces"])
     return f"""
 <h2>What the store looks like</h2>
-<p>Four views drawn from the store itself, not from a figure made elsewhere. The diagram is the layout; the map is the costly read; the hydrographs are the cheap one; the last grid is one row of the array.</p>
+<p>Five views drawn from the store itself, not from a figure made elsewhere. The diagram is the layout; the river network is the index; the map is the costly read; the hydrographs are the cheap one; the last grid is one row of the array.</p>
 
 <figure class="viz diagram">{anatomy_svg(an, yl)}
 <figcaption class="sub">The 0.05° grid keeps only its {an["cells"]:,} land cells, in row-major order, as one axis of a (cell, time) array. The array is cut into shards of {an["shard"][0]:,} cells × {an["shard"][1]:,} days ({an["shard_raw_mb"]} MB raw), each holding {an["chunks_per_shard"]} chunks of {an["chunk"][0]} cells. A point's full history is {an["point_history_fetches"]} small fetches; a day across the globe touches {an["one_day_map_chunks"]:,} chunks, which is why maps are made from bronze or from a bounded box, not from this store.</figcaption></figure>
 
+<h3>Upstream area: a property of every cell, and the river network it defines</h3>
+<p>Every land cell carries the area that drains into it, <code>uparea_km2</code> in the index, summed over the flow-direction map from that cell up to the ridges. It says nothing about any gauge: a cell on the Jamuna holds about a million km², a hillslope cell holds the cell's own 25 km². Keeping only the cells at or above a threshold keeps the rivers and drops the slopes; this is the subset a reforecast mirror would hold. Each {nw["coarse_deg"]}° square below is coloured by the largest upstream area among its {round(nw["coarse_deg"] / 0.05) ** 2} fine cells, and stays lit while any one of them clears the threshold, so the picture overstates what is kept and the count beside the slider is the exact figure from the index. Move the slider.</p>
+<div class="viz" id="netviz"><div class="bar"><label>keep cells with upstream area ≥ <span class="num" id="netthr"></span> km² <input type="range" id="netrange" min="0" max="{len(nw["thresholds"]) - 1}" step="1" value="3"></label><span id="netout"></span></div>
+<canvas id="net" width="{nw["cols"]}" height="{nw["rows"]}"></canvas><div class="tip"></div>
+<p class="sub">Store sizes are for a reforecast store of every issue date, 11 members and leads 1 to 15 at the reanalysis store's measured compression, and for the reanalysis store as built.</p></div>
+
 <h3>{esc(mp["name"])}: the cells, their upstream area, and two days of discharge</h3>
-<p>{mp["rows"]} rows × {mp["cols"]} columns of the grid, {mp["land_cells"]:,} land cells, from latitude {mp["lat"][0]:.3f} to {mp["lat"][1]:.3f} and longitude {mp["lon"][0]:.3f} to {mp["lon"][1]:.3f}. The upstream-area layer is the index alone; the discharge layers are one read of the store for {mp["land_cells"]:,} cells on {mp["dates"][0]} and {mp["dates"][1]} ({mp["read_s"]} s, {mp["chunks_touched"]:,} chunks in {mp["shards_touched"]} shards). The lines trace <code>downstream_cell</code> from {esc(traces)}. Hover or touch a cell.</p>
+<p>{mp["rows"]} rows × {mp["cols"]} columns of the grid, {mp["land_cells"]:,} land cells, from latitude {mp["lat"][0]:.3f} to {mp["lat"][1]:.3f} and longitude {mp["lon"][0]:.3f} to {mp["lon"][1]:.3f}. The upstream-area layer is the index alone; the discharge layers are one read of the store for {mp["land_cells"]:,} cells on {mp["dates"][0]} and {mp["dates"][1]} ({mp["read_s"]} s, {mp["chunks_touched"]:,} chunks in {mp["shards_touched"]} shards). The lines trace <code>downstream_cell</code> from {esc(traces)}. The other meaning of upstream is the fourth layer: the {ca["cells"]:,} cells of the box whose downstream chain reaches {esc(ca["to"])}, its catchment as far as the box shows it; the Shabelle's head lies beyond the box in Ethiopia. The slider greys out cells below the threshold on the upstream-area layer. Hover or touch a cell.</p>
 <div class="viz" id="mapviz"><div class="bar">
-<button data-layer="up" aria-pressed="true">upstream area</button><button data-layer="q0">discharge {mp["dates"][0]}</button><button data-layer="q1">discharge {mp["dates"][1]}</button>
+<button data-layer="up" aria-pressed="true">upstream area</button><button data-layer="q0">discharge {mp["dates"][0]}</button><button data-layer="q1">discharge {mp["dates"][1]}</button><button data-layer="catch">drains to {esc(ca["to"])}</button>
+<label>≥ <span class="num" id="mapthr"></span> km² <input type="range" id="maprange" min="0" max="{len(nw["thresholds"]) - 1}" step="1" value="0"></label>
 <span><i class="ramp" id="ramp"></i><span id="rampl"></span></span><span><i style="display:inline-block;width:22px;border-top:2px solid var(--trace);vertical-align:middle;margin-right:5px"></i>downstream trace</span><span><i style="display:inline-block;width:9px;height:9px;border:2px solid var(--fg);border-radius:50%;background:var(--panel);vertical-align:middle;margin-right:5px"></i>framework point</span>
 </div><canvas id="map" width="{mp["cols"] * 4}" height="{mp["rows"] * 4}"></canvas><div class="tip"></div></div>
 <div class="wrap"><table><thead><tr><th>framework point</th><th>cell</th><th>upstream km²</th></tr></thead><tbody>{st_rows}</tbody></table></div>
@@ -200,19 +210,53 @@ function showTip(viz, tip, ev, html) {{
 const fmt = v => v == null ? 'no data' : (v >= 100 ? Math.round(v).toLocaleString() : v.toPrecision(3)) + ' m³/s';
 const dayToDate = (t0, i) => {{ const d = new Date(t0 + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + i); return d.toISOString().slice(0,10); }};
 
+// ---- river network by threshold (index only)
+const N = S.network, TH = N.thresholds, nv = document.getElementById('netviz'), ncv = document.getElementById('net'), ntip = nv.querySelector('.tip');
+const NB = Uint8Array.from(atob(N.max_log10_uparea_u8), ch => ch.charCodeAt(0));
+const nLog = b => N.log_lo + b / N.log_per;   // byte -> log10 km²
+const allCells = N.counts['0'], GB_RF = 1800, GB_RA = 53;   // reforecast leads 1-15 at the reanalysis ratio; the reanalysis store
+const netRange = document.getElementById('netrange');
+function drawNet() {{
+  const R = ramp(), ctx = ncv.getContext('2d'), s = 1, thr = TH[+netRange.value], lthr = Math.log10(Math.max(thr, 1)), dim = css('--line');
+  ctx.clearRect(0, 0, ncv.width, ncv.height);
+  for (let r = 0; r < N.rows; r++) for (let c = 0; c < N.cols; c++) {{
+    const b = NB[r * N.cols + c]; if (!b) continue;
+    const l = nLog(b);
+    ctx.fillStyle = (thr === 0 || l >= lthr) ? colour((l - 1) / 6, R) : dim; ctx.fillRect(c*s, r*s, s, s);
+  }}
+  const k = N.counts[String(thr)], share = k / allCells;
+  document.getElementById('netthr').textContent = thr.toLocaleString();
+  document.getElementById('netout').innerHTML = `<span class="num">${{k.toLocaleString()}}</span> cells, ${{(100*share).toFixed(share < 0.1 ? 1 : 0)}}% of land · reforecast store ≈ <span class="num">${{Math.round(GB_RF*share).toLocaleString()}} GB</span> · reanalysis store ≈ <span class="num">${{(GB_RA*share).toFixed(1)}} GB</span>`;
+}}
+netRange.addEventListener('input', drawNet);
+ncv.addEventListener('pointermove', ev => {{
+  const bx = ncv.getBoundingClientRect(), c = Math.floor((ev.clientX - bx.left) / bx.width * N.cols), r = Math.floor((ev.clientY - bx.top) / bx.height * N.rows);
+  const b = (r >= 0 && c >= 0 && r < N.rows && c < N.cols) ? NB[r * N.cols + c] : 0;
+  if (!b) {{ ntip.style.display = 'none'; return; }}
+  showTip(nv, ntip, ev, `lat ${{(N.lat0 - (r + 0.5) * N.coarse_deg).toFixed(2)}} lon ${{(N.lon0 + (c + 0.5) * N.coarse_deg).toFixed(2)}}<br>largest upstream area in this ${{N.coarse_deg}}° square: ${{Math.round(10**nLog(b)).toLocaleString()}} km²`);
+}});
+ncv.addEventListener('pointerleave', () => ntip.style.display = 'none');
+
 // ---- map
 const M = S.map, mv = document.getElementById('mapviz'), mc = document.getElementById('map'), mtip = mv.querySelector('.tip');
 let layer = 'up';
+const mapRange = document.getElementById('maprange');
+const CATCH = new Set(M.catchment.rc.map(([r, c]) => r * M.cols + c));
 const q0 = M.q[0], q1 = M.q[1];
 const lq = v => Math.log10(1 + v), qmaxL = lq(M.qmax);
 function drawMap() {{
   const R = ramp(), ctx = mc.getContext('2d'), s = 4;
   ctx.clearRect(0, 0, mc.width, mc.height);
-  const g = layer === 'up' ? M.log10_uparea : (layer === 'q0' ? q0 : q1);
-  const scale = layer === 'up' ? (v => (v - 1) / (7 - 1)) : (v => lq(v) / qmaxL);
+  const g = (layer === 'up' || layer === 'catch') ? M.log10_uparea : (layer === 'q0' ? q0 : q1);
+  const scale = (layer === 'up' || layer === 'catch') ? (v => (v - 1) / (7 - 1)) : (v => lq(v) / qmaxL);
+  const thr = TH[+mapRange.value], lthr = Math.log10(Math.max(thr, 1)), dim = css('--line'), acc = css('--accent');
+  document.getElementById('mapthr').textContent = thr.toLocaleString();
   for (let r = 0; r < M.rows; r++) for (let c = 0; c < M.cols; c++) {{
     const v = g[r][c]; if (v == null) continue;
-    ctx.fillStyle = colour(scale(v), R); ctx.fillRect(c*s, r*s, s, s);
+    let f = colour(scale(v), R);
+    if (layer === 'up' && thr > 0 && v < lthr) f = dim;
+    if (layer === 'catch') f = CATCH.has(r * M.cols + c) ? acc : dim;
+    ctx.fillStyle = f; ctx.fillRect(c*s, r*s, s, s);
   }}
   ctx.strokeStyle = css('--trace'); ctx.lineWidth = 2.5; ctx.lineJoin = 'round';
   for (const t of M.traces) {{ ctx.beginPath(); t.path.forEach(([r,c],i) => ctx[i?'lineTo':'moveTo'](c*s+s/2, r*s+s/2)); ctx.stroke(); }}
@@ -220,17 +264,18 @@ function drawMap() {{
     ctx.beginPath(); ctx.arc(p.c*s+s/2, p.r*s+s/2, 6, 0, 7); ctx.fillStyle = css('--panel'); ctx.fill(); ctx.strokeStyle = css('--fg'); ctx.lineWidth = 2; ctx.stroke();
     ctx.fillStyle = css('--fg'); ctx.font = '600 13px ' + css('--body'); ctx.fillText(p.name, p.c*s + 11, p.r*s + 5);
   }}
-  setRamp(document.getElementById('ramp'), layer === 'up' ? 'upstream area 10 to 10⁷ km², log' : 'discharge 0 to ' + Math.round(M.qmax).toLocaleString() + ' m³/s, log', document.getElementById('rampl'), R);
+  setRamp(document.getElementById('ramp'), layer === 'catch' ? `${{M.catchment.cells.toLocaleString()}} cells drain to ${{M.catchment.to}} (accent); the rest of the box grey` : (layer === 'up' ? 'upstream area 10 to 10⁷ km², log' : 'discharge 0 to ' + Math.round(M.qmax).toLocaleString() + ' m³/s, log'), document.getElementById('rampl'), R);
 }}
 mv.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {{
   layer = b.dataset.layer; mv.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b)); drawMap();
 }}));
+mapRange.addEventListener('input', drawMap);
 function cellId(r, c) {{ const f = M.row_cell0[r]; if (f == null) return null; let n = 0; for (let k = 0; k < c; k++) if (M.log10_uparea[r][k] != null) n++; return f + n; }}
 mc.addEventListener('pointermove', ev => {{
   const b = mc.getBoundingClientRect(), c = Math.floor((ev.clientX - b.left) / b.width * M.cols), r = Math.floor((ev.clientY - b.top) / b.height * M.rows);
   if (r < 0 || c < 0 || r >= M.rows || c >= M.cols || M.log10_uparea[r][c] == null) {{ mtip.style.display = 'none'; return; }}
   const lat = (M.lat[0] - r * 0.05).toFixed(3), lon = (M.lon[0] + c * 0.05).toFixed(3);
-  showTip(mv, mtip, ev, `cell ${{cellId(r,c).toLocaleString()}} · row ${{r}} col ${{c}} of the box<br>lat ${{lat}} lon ${{lon}}<br>upstream ${{Math.round(10**M.log10_uparea[r][c]).toLocaleString()}} km²<br>${{M.dates[0]}}: ${{fmt(q0[r][c])}}<br>${{M.dates[1]}}: ${{fmt(q1[r][c])}}`);
+  showTip(mv, mtip, ev, `cell ${{cellId(r,c).toLocaleString()}} · row ${{r}} col ${{c}} of the box<br>lat ${{lat}} lon ${{lon}}<br>upstream ${{Math.round(10**M.log10_uparea[r][c]).toLocaleString()}} km²${{CATCH.has(r * M.cols + c) ? ' · drains to ' + M.catchment.to : ''}}<br>${{M.dates[0]}}: ${{fmt(q0[r][c])}}<br>${{M.dates[1]}}: ${{fmt(q1[r][c])}}`);
 }});
 mc.addEventListener('pointerleave', () => mtip.style.display = 'none');
 
@@ -277,7 +322,7 @@ hc.addEventListener('pointermove', ev => {{
 }});
 hc.addEventListener('pointerleave', () => htip.style.display = 'none');
 
-function all() {{ drawMap(); drawHm(); document.querySelectorAll('canvas.hyd').forEach(c => c._redraw()); }}
+function all() {{ drawNet(); drawMap(); drawHm(); document.querySelectorAll('canvas.hyd').forEach(c => c._redraw()); }}
 all();
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', all);
 new MutationObserver(all).observe(document.documentElement, {{ attributes: true, attributeFilter: ['data-theme'] }});

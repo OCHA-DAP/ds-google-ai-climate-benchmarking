@@ -1,7 +1,9 @@
 """Small snapshots of the GloFAS v4 mirror, read straight from the Zarr on blob, for the page's
 "what the store looks like" views: one basin's cells on two days (a map, the costly read), full
-point histories at three stations (the cheap read), one cell as a year x day grid, and the
-numbers the anatomy diagram is drawn from. Writes outputs/glofas_mirror/snapshots.json.
+point histories at three stations (the cheap read), one cell as a year x day grid, the
+numbers the anatomy diagram is drawn from, and the river network by upstream-area threshold
+(a coarse global grid, the exact cell count per threshold, and the box cells draining to one
+framework point), from the index alone. Writes outputs/glofas_mirror/snapshots.json.
 
 Only dates inside years with a load marker are read; a requested map date in a year without a
 marker is an error, never a blank map.
@@ -12,6 +14,7 @@ marker is an error, never a blank map.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import json
 import math
@@ -40,7 +43,60 @@ MAP = {  # the Somalia framework's basins: Juba and Shabelle from the Ethiopian 
     "lon": (40.0, 49.0),
     "framework": "Somalia",
     "traces": ["belet_weyne", "luuq"],  # drawn downstream to the outlet, cell by cell
+    "catchment": "belet_weyne",  # the box cells whose downstream chain reaches this point
 }
+THRESHOLDS = [0, 100, 500, 1000, 5000, 10000, 50000]  # km² upstream; 0 is every land cell
+COARSE = 5  # 0.05° cells per side of a coarse cell in the global network panel (0.25°)
+LOG_LO, LOG_PER = 1.0, 36.0  # uint8 encoding of log10 upstream area: (log10 - 1) * 36
+
+
+def network(idx: pd.DataFrame) -> dict:
+    """The river network by threshold: exact counts, and a coarse global grid holding each
+    coarse cell's largest upstream area, encoded to one byte (0 is no land)."""
+    up = idx.uparea_km2.values
+    if not np.all(np.isfinite(up)) or up.min() <= 0:
+        raise ValueError("upstream area must be finite and positive on every land cell")
+    counts = {str(t): int((up >= t).sum()) for t in THRESHOLDS}
+    nr, nc = int(idx.row.max()) // COARSE + 1, int(idx.col.max()) // COARSE + 1
+    g = np.zeros((nr, nc), dtype=np.float64)
+    np.maximum.at(g, (idx.row.values // COARSE, idx.col.values // COARSE), up)
+    enc = np.zeros(g.shape, dtype=np.uint8)
+    land = g > 0
+    enc[land] = np.clip(np.round((np.log10(g[land]) - LOG_LO) * LOG_PER), 1, 255)
+    return {
+        "thresholds": THRESHOLDS,
+        "counts": counts,
+        "coarse_deg": COARSE * 0.05,
+        "rows": nr,
+        "cols": nc,
+        "lat0": float(idx.lat.max()) + 0.025,
+        "lon0": float(idx.lon.min()) - 0.025,
+        "log_lo": LOG_LO,
+        "log_per": LOG_PER,
+        "max_log10_uparea_u8": base64.b64encode(enc.tobytes()).decode(),
+    }
+
+
+def catchment_in_box(idx: pd.DataFrame, cells: np.ndarray, target: int) -> list[int]:
+    """Cells among `cells` whose downstream chain reaches `target`, following the index's
+    downstream_cell links (the chain stops at the sea, -1)."""
+    down = idx.downstream_cell.values
+    reaches: dict[int, bool] = {target: True}
+    out = []
+    for c0 in cells:
+        c, path = int(c0), []
+        while c not in reaches:
+            path.append(c)
+            c = int(down[c])
+            if c < 0:
+                reaches[c] = False
+                break
+        hit = reaches[c]
+        for p_ in path:
+            reaches[p_] = hit
+        if hit:
+            out.append(int(c0))
+    return out
 
 
 def sig(x: float, n: int = 3) -> float | None:
@@ -75,6 +131,10 @@ def main(argv=None) -> int:
     years_loaded = sorted(int(y) for y in loaded)
     idx = gm.load_index()
     stamp_year = np.array([year_of_stamp(d) for d in dates])
+    out_network = network(idx)
+    print(
+        "network: " + ", ".join(f"≥{t:,} km² {out_network['counts'][str(t)]:,}" for t in THRESHOLDS)
+    )
     in_loaded = np.isin(stamp_year, years_loaded)
     print(f"store {q.shape}, {len(years_loaded)} years loaded, {in_loaded.sum():,} days readable")
 
@@ -214,6 +274,16 @@ def main(argv=None) -> int:
             c = int(down[c])
             steps += 1
         traces.append({"from": key.replace("_", " ").title(), "cells": len(path), "path": path})
+    ckey = MAP["catchment"]
+    target = int(find_cell(idx, *POINTS[MAP["framework"]][2][ckey]).cell)
+    drains = catchment_in_box(idx, cells, target)
+    rows_, cols_ = idx.row.values[drains] - r0, idx.col.values[drains] - c0
+    catchment = {
+        "to": ckey.replace("_", " ").title(),
+        "cells": len(drains),
+        "rc": [[int(a), int(b)] for a, b in zip(rows_, cols_, strict=True)],
+    }
+    print(f"catchment of {catchment['to']} inside the box: {len(drains):,} cells")
     out["map"] = {
         "name": MAP["name"],
         "lat": [lat_of(r0), lat_of(r1)],
@@ -231,7 +301,9 @@ def main(argv=None) -> int:
         "qmax": sig(np.nanmax(block)),
         "stations": stations,
         "traces": traces,
+        "catchment": catchment,
     }
+    out["network"] = out_network
     print(
         f"map {nr}x{nc}, {len(cells):,} land cells, 2 days in {sec:.1f} s "
         f"({out['map']['chunks_touched']} chunks in {out['map']['shards_touched']} shards)"
