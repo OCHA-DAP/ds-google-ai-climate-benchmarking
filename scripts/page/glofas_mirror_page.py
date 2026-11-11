@@ -83,14 +83,22 @@ def hydrograph(st: dict, s: pd.DataFrame) -> str:
     bd = st.get("boundary_days_differing") or []
     out.append(
         f'<text x="{w - r}" y="{t - 10}" text-anchor="end" font-size="11" fill="var(--muted)">spoke stamp shift {st["spoke_shift_days"]:+d} d · {st["n_compared"]:,} days · {st["share_equal_1e-3"]:.2%} equal'
-        + (f" · spoke file-boundary days differ: {', '.join(bd)}" if bd else " · max diff 0")
+        + (
+            (
+                f" · {len(bd)} spoke file-boundary days differ"
+                if len(bd) > 3
+                else f" · spoke file-boundary days differ: {', '.join(bd)}"
+            )
+            if bd
+            else " · max diff 0"
+        )
         + "</text>"
     )
     out.append("</svg>")
     return "".join(out)
 
 
-def main() -> int:
+def main(without_backfill: bool = False) -> int:
     c = json.loads((OUT / "check.json").read_text())
     series = (
         pd.read_csv(OUT / "series.csv")
@@ -99,7 +107,8 @@ def main() -> int:
     )
     png = base64.b64encode((OUT / "landmask.png").read_bytes()).decode()
     snap = json.loads((OUT / "snapshots.json").read_text())  # scripts/glofas_mirror_snapshots.py
-    bf = json.loads((OUT / "backfill.json").read_text())  # scripts/glofas_mirror_runs.py
+    # scripts/glofas_mirror_runs.py; absent only when the build says so (a run is still going)
+    bf = json.loads((OUT / "backfill.json").read_text()) if not without_backfill else None
     st, by, rc, ix = c["store"], c["bytes"], c["read_cost"], c["index"]
     years = sorted(st["years_loaded"])
     allpass = c["n_pass"] == c["n_checks"]
@@ -120,17 +129,43 @@ def main() -> int:
     attrs = "".join(
         f"<tr><td>{esc(k)}</td><td>{esc(str(v))}</td></tr>" for k, v in st["attrs"].items()
     )
-    runs_tbl = "".join(
-        f"<tr><td>{r['run_id']}</td><td>{esc(r['start'][:16].replace('T', ' '))}</td><td>{r['hours']}</td><td>{len(r['years_loaded'])}: {r['years_loaded'][0]} to {r['years_loaded'][-1]}</td><td>{esc(r['result'])}{(' in task ' + r['failed_task']) if r['failed_task'] else ''}; {esc(r['message'].split('.')[0]) if r['message'] else 'all tasks finished'}</td></tr>"
-        if r["years_loaded"]
-        else f"<tr><td>{r['run_id']}</td><td>{esc(r['start'][:16].replace('T', ' '))}</td><td>{r['hours']}</td><td>none</td><td>{esc(r['result'])}; {esc(r['message'][:120])}</td></tr>"
-        for r in bf["runs"]
+    runs_tbl = (
+        ""
+        if bf is None
+        else "".join(
+            f"<tr><td>{r['run_id']}</td><td>{esc(r['start'][:16].replace('T', ' '))}</td><td>{r['hours']}</td><td>{len(r['years_loaded'])}: {r['years_loaded'][0]} to {r['years_loaded'][-1]}</td><td>{esc(r['result'])}{(' in task ' + r['failed_task']) if r['failed_task'] else ''}; {esc(r['message'].split('.')[0]) if r['message'] else 'all tasks finished'}</td></tr>"
+            if r["years_loaded"]
+            else f"<tr><td>{r['run_id']}</td><td>{esc(r['start'][:16].replace('T', ' '))}</td><td>{r['hours']}</td><td>none</td><td>{esc(r['result'])}; {esc(r['message'][:120])}</td></tr>"
+            for r in bf["runs"]
+        )
+    )
+    bgd = next((x for x in c["stations"] if x["station"].startswith("Bahadurabad")), {})
+    bgd_bd = bgd.get("boundary_days_differing") or []
+    bgd_bd_desc = (
+        ", ".join(bgd_bd)
+        if len(bgd_bd) <= 3
+        else f"{sum(d.endswith('-01-01') for d in bgd_bd)} of them a 1 January, from {bgd_bd[0]} to {bgd_bd[-1]}"
     )
     stations_tbl = "".join(
         f"<tr><td>{esc(s['station'])}</td><td>{s['cell']:,}</td><td>{s['lat']:.3f}, {s['lon']:.3f}</td><td>{s['uparea_km2']:,.0f}</td><td>{s['spoke_shift_days']:+d}</td><td>{s['n_compared']}</td><td>{s['share_equal_1e-3']:.2%}</td><td>{s['max_abs_diff']:.3g}</td><td>{s['one_point_history_s']} s</td></tr>"
         for s in c["stations"]
     )
 
+    backfill_sec = (
+        """<h2>How the backfill ran</h2>
+<p>The backfill is still running; this section is written from the Databricks API once it has ended.</p>
+"""
+        if bf is None
+        else f"""<h2>How the backfill ran</h2>
+<p>{bf["ewds_requests"]} whole-globe requests on the team's EWDS key, one job on the single-node policy, started three times. Every year's state lives in three ledgers (the EWDS request id, the bronze file, the load marker), so each restart skipped what was done and redid only the year it was interrupted in. {("Resubmitted to EWDS: " + ", ".join(bf["ewds_resubmitted"]) + ".") if bf["ewds_resubmitted"] else "No request had to be resubmitted."} Total {bf["hours"]} cluster hours, about ${bf["usd"]} at ${bf["usd_per_hour"]} an hour ({esc(bf["rate_note"])}).</p>
+<div class="wrap"><table><thead><tr><th>run</th><th>started (UTC)</th><th>hours</th><th>years loaded</th><th>ended with</th></tr></thead><tbody>{runs_tbl}</tbody></table></div>
+<ul>
+<li><b>Driver memory.</b> The first run stopped after 29 years when the driver stopped responding during the 2007 load: the loader held the 2.4 GB yearly file in memory and made two 1 GB copies per band, 7.7 GB resident beside the Spark driver on a 14 GB node. The file is now read from the node's disk and the band write is one copy; peak fell to 5.8 GB and a year loads in about half the time.</li>
+<li><b>A dropped download.</b> The second run stopped when EWDS closed the 2015 download at 1.7 of 2.4 GB. A broken stream is now retried from scratch, and a zero-byte bronze blob (what an aborted staged upload leaves behind) no longer counts as present.</li>
+<li><b>Open.</b> 2025 from where the consolidated product ends; a second Copernicus key so a backfill does not queue behind the monitoring runs; an instance pool, since each restart paid a cluster start; v5 as a sibling prefix when it is operational; the code moved to its own pipeline repo with a KB page. Design and rejected layouts: ADR 0003 in the benchmark repo.</li>
+</ul>
+"""
+    )
     html = f"""<title>GloFAS v4 Mirror</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>
@@ -231,21 +266,13 @@ q = pd.Series(g["q"][cell, :], index=pd.Timestamp("1979-01-01") + pd.to_timedelt
 <h2>Findings from this run</h2>
 <ul>
 <li><b>Sharded Zarr v3 on Azure Blob needs the shard index at the start.</b> Zarr's default puts each shard's chunk index at its end and reads it with a suffix byte range; Azure Blob serves none, adlfs passes the request through, and every partial read fails with "Required Content-Range response header is missing". Tested on two small arrays with the same code and credentials: index at the end fails, index at the start reads. The first build of this store had to be redone for that one setting, from bronze, with no new EWDS request. Unsharded Zarr (the team's IMERG and CMA stores) is not affected. Rule for any sharded Zarr on the team's blob: <code>index_location="start"</code>.</li>
-<li><b>The Bangladesh spoke's per-year GloFAS files carry a boundary-day artefact.</b> At Bahadurabad the mirror equals the spoke copy on every day except 2001-01-01 and 2022-12-31, where the spoke's yearly file holds the neighbouring day's value (its 31 Dec 2022 is EWDS's 1 Jan 2023). The mirror is internally consistent there. Harmless for a flood threshold, but it is the incumbent series the benchmark reads, so the framework owner should know.</li>
+<li><b>The Bangladesh spoke's per-year GloFAS files carry a boundary-day artefact.</b> At Bahadurabad the mirror equals the spoke copy on every day except {len(bgd_bd)} file-boundary days ({esc(bgd_bd_desc)}), where the spoke's yearly file holds the neighbouring day's value (its 31 Dec 2022 is EWDS's 1 Jan 2023). The mirror is internally consistent there. Harmless for a flood threshold, but it is the incumbent series the benchmark reads, so the framework owner should know.</li>
 <li><b>Appending into a filled shard column costs more.</b> 2023 took {st["years_loaded"]["2023"]["seconds"] // 60} minutes against {st["years_loaded"]["2022"]["seconds"] // 60} for 2022 because it rewrote the shards 2022 had already filled. In the backfill the second to fifth year of every five-year column pays this, so plan on about ten minutes a year, not six.</li>
 <li><b>Storage came in well under the gridded estimate.</b> The probe on the full grid projected about 107 GB for all land cells; the (cell, time) layout compresses along time and measures {by["q_zarr_per_year_gb"]} GB a year on three real years, {by["q_zarr_47yr_gb_projection"]} GB for the record.</li>
 <li><b>The EWDS key is shared.</b> The requests submitted from a laptop key were visible to the Databricks job's key without resubmission, so the key in use is the same one the daily Nigeria and Somalia monitoring queues on. A second key does not exist yet.</li>
 </ul>
 
-<h2>How the backfill ran</h2>
-<p>{bf["ewds_requests"]} whole-globe requests on the team's EWDS key, one job on the single-node policy, started three times. Every year's state lives in three ledgers (the EWDS request id, the bronze file, the load marker), so each restart skipped what was done and redid only the year it was interrupted in. {("Resubmitted to EWDS: " + ", ".join(bf["ewds_resubmitted"]) + ".") if bf["ewds_resubmitted"] else "No request had to be resubmitted."} Total {bf["hours"]} cluster hours, about ${bf["usd"]} at ${bf["usd_per_hour"]} an hour ({esc(bf["rate_note"])}).</p>
-<div class="wrap"><table><thead><tr><th>run</th><th>started (UTC)</th><th>hours</th><th>years loaded</th><th>ended with</th></tr></thead><tbody>{runs_tbl}</tbody></table></div>
-<ul>
-<li><b>Driver memory.</b> The first run stopped after 29 years when the driver stopped responding during the 2007 load: the loader held the 2.4 GB yearly file in memory and made two 1 GB copies per band, 7.7 GB resident beside the Spark driver on a 14 GB node. The file is now read from the node's disk and the band write is one copy; peak fell to 5.8 GB and a year loads in about half the time.</li>
-<li><b>A dropped download.</b> The second run stopped when EWDS closed the 2015 download at 1.7 of 2.4 GB. A broken stream is now retried from scratch, and a zero-byte bronze blob (what an aborted staged upload leaves behind) no longer counts as present.</li>
-<li><b>Open.</b> 2025 from where the consolidated product ends; a second Copernicus key so a backfill does not queue behind the monitoring runs; an instance pool, since each restart paid a cluster start; v5 as a sibling prefix when it is operational; the code moved to its own pipeline repo with a KB page. Design and rejected layouts: ADR 0003 in the benchmark repo.</li>
-</ul>
-</main>
+{backfill_sec}</main>
 """
     (OUT / "index.html").write_text(html)
     print(f"wrote {OUT / 'index.html'} ({len(html) / 1e3:.0f} kB)")
@@ -253,4 +280,4 @@ q = pd.Series(g["q"][cell, :], index=pd.Timestamp("1979-01-01") + pd.to_timedelt
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(main(without_backfill="--without-backfill" in sys.argv[1:]))
