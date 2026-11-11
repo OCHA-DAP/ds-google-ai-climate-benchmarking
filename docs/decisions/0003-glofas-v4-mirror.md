@@ -61,6 +61,12 @@ cell. Pathed by version so a v5 mirror is a sibling.
   blob per loaded year). A stopped or frozen run is started again with the same years; a year
   interrupted mid-load has no marker and is rewritten in place. The raw yearly file is kept
   because it is what makes a store rebuild possible without EWDS, which the first evening needed.
+- The product's last year is accepted short, but only when asked. The consolidated product ends
+  at the 31 December 2024 stamp, so the 2024 file is one day shorter than every other year's and
+  the loader's calendar check refused it (11 November 2026). `--allow-short-last-year` accepts a
+  file that stops early, writes the days present and records `complete: false` in the year's
+  marker; a year marked incomplete is the one to re-request when the product extends. The
+  default stays strict so a truncated file for any other year is still an error.
 - Shard index at the start of each shard (`index_location="start"`). Azure Blob serves no
   suffix byte ranges and adlfs passes them through, so with zarr's default (index at the end)
   every partial shard read from blob fails with "Required Content-Range response header is
@@ -78,6 +84,12 @@ cell. Pathed by version so a v5 mirror is a sibling.
   the array attributes, so a bad year cannot be half-written.
 - Bad: a yearly append rewrites one shard column; concurrent loads of years in the same column
   must not run (the loader processes years sequentially).
+- Seen in the backfill (10 to 11 November 2026, 44 years in four runs, about 12 cluster hours):
+  the loader must read the yearly file from the node's disk, not from memory, and make one copy
+  per band, or it sits at 7.7 GB resident beside the Spark driver on the 14 GB node and the
+  driver is killed; EWDS drops a 2.4 GB download now and then, so the stream is retried from
+  scratch and a zero-byte bronze blob (what an aborted staged upload leaves) does not count as
+  present; the per-year memory and time are in each year's marker.
 - Bad: the EWDS requests share the team key's queue with the daily Nigeria and Somalia runs; the
   backfill should run off-season or on a second key.
 - Bad: the code lives in the benchmark repo for now (public repo creation is blocked for the
