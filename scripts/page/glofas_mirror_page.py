@@ -18,6 +18,8 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent))
 from charts import esc
+from glofas_mirror_viz import CSS as VIZ_CSS
+from glofas_mirror_viz import section as viz_section
 
 OUT = Path("outputs/glofas_mirror")
 MIRROR = "var(--accent)"
@@ -29,68 +31,58 @@ def tile(v, label):
 
 
 def hydrograph(st: dict, s: pd.DataFrame) -> str:
-    """Mirror and spoke daily discharge at one station: one panel per loaded year, one shared
-    y scale, so the gap between years is not drawn as a line."""
+    """Mirror and spoke daily discharge at one station over every compared day on one time axis,
+    the line broken wherever a day is missing (an unloaded year), both series reduced to one
+    value per pixel column (the maximum, so floods survive) before drawing."""
     s = s.sort_values("date")
     d = pd.to_datetime(s.date)
-    years = sorted(
-        set(d.dt.year[(d.dt.month > 1) | (d.dt.day > 1)])
-    )  # a 1 Jan stamp belongs to the year before
-    w, h, l, r, t, b, gap = 1100, 240, 70, 16, 28, 34, 24
-    n = max(len(years), 1)
-    pw = (w - l - r - gap * (n - 1)) / n
-    ph = h - t - b
+    w, h, l, r, t, b = 1100, 220, 70, 16, 28, 30
+    pw, ph = w - l - r, h - t - b
+    d0, d1 = d.min(), d.max()
+    span = max((d1 - d0).days, 1)
     ymax = max(float(s.mirror.max()), float(s.spoke.max())) * 1.05 or 1.0
+    X = lambda dt_: l + (dt_ - d0).days / span * pw
     Y = lambda v: t + ph - v / ymax * ph
     out = [
-        f'<svg viewBox="0 0 {w} {h}" width="100%" role="img" aria-label="{esc(st["station"])}: mirror and spoke daily discharge, one panel per loaded year">'
+        f'<svg viewBox="0 0 {w} {h}" width="100%" role="img" aria-label="{esc(st["station"])}: mirror and spoke daily discharge on one time axis">'
     ]
     for k in range(5):
         v = ymax * k / 4
         out.append(
+            f'<line x1="{l}" x2="{w - r}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="var(--line)" stroke-width="1"/>'
             f'<text x="{l - 8}" y="{Y(v) + 4:.1f}" text-anchor="end" font-size="11" fill="var(--muted)" font-family="var(--mono)">{v:,.0f}</text>'
         )
-    for i, yr in enumerate(years):
-        x0 = l + i * (pw + gap)
-        a, bnd = pd.Timestamp(yr, 1, 2), pd.Timestamp(yr + 1, 1, 1)
-        sel = (d >= a) & (d <= bnd)
-        X = lambda dt, x0=x0, a=a, bnd=bnd: x0 + (dt - a).days / max((bnd - a).days, 1) * pw
-        for k in range(5):
-            v = ymax * k / 4
-            out.append(
-                f'<line x1="{x0:.1f}" x2="{x0 + pw:.1f}" y1="{Y(v):.1f}" y2="{Y(v):.1f}" stroke="var(--line)" stroke-width="1"/>'
-            )
-        for m in (4, 7, 10):
-            dm = pd.Timestamp(yr, m, 1)
-            out.append(
-                f'<line x1="{X(dm):.1f}" x2="{X(dm):.1f}" y1="{t}" y2="{t + ph}" stroke="var(--line)" stroke-width="1"/>'
-            )
-            out.append(
-                f'<text x="{X(dm) + 3:.1f}" y="{h - 12}" font-size="10" fill="var(--muted)" font-family="var(--mono)">{dm:%b}</text>'
-            )
+    for yr in range(d0.year, d1.year + 1):
+        if yr % 5:
+            continue
+        x = X(pd.Timestamp(yr, 1, 1))
+        if x < l or x > w - r:
+            continue
         out.append(
-            f'<text x="{x0:.1f}" y="{h - 12}" font-size="11" fill="var(--fg)" font-family="var(--mono)">{yr}</text>'
+            f'<line x1="{x:.1f}" x2="{x:.1f}" y1="{t}" y2="{t + ph}" stroke="var(--line)" stroke-width="1"/>'
+            f'<text x="{x + 3:.1f}" y="{h - 10}" font-size="11" fill="var(--muted)" font-family="var(--mono)">{yr}</text>'
         )
-        ds_, sp, mi = d[sel], s.spoke[sel], s.mirror[sel]
-        if len(ds_):
-
-            def path(vals, X=X, ds_=ds_):
-                return "M" + " L".join(
-                    f"{X(dd):.1f},{Y(v):.1f}" for dd, v in zip(ds_, vals, strict=True)
-                )
-
-            out.append(
-                f'<path d="{path(sp)}" fill="none" stroke="{SPOKE}" stroke-width="3.5" stroke-dasharray="7 5" stroke-linejoin="round"/>'
-            )
-            out.append(
-                f'<path d="{path(mi)}" fill="none" stroke="{MIRROR}" stroke-width="1.6" stroke-linejoin="round"/>'
-            )
+    # one value per pixel column: the maximum of each series in that column; a column with no
+    # day (an unloaded year) breaks the line
+    px = ((d - d0).dt.days / span * pw).astype(int)
+    g = pd.DataFrame({"px": px.values, "mirror": s.mirror.values, "spoke": s.spoke.values})
+    g = g.groupby("px").max()
+    for col, style in (
+        ("spoke", f'stroke="{SPOKE}" stroke-width="3" stroke-dasharray="6 4"'),
+        ("mirror", f'stroke="{MIRROR}" stroke-width="1.4"'),
+    ):
+        parts, prev = [], None
+        for p_, v in g[col].items():
+            cmd = "M" if prev is None or p_ - prev > 2 else "L"
+            parts.append(f"{cmd}{l + p_},{Y(v):.1f}")
+            prev = p_
+        out.append(f'<path d="{" ".join(parts)}" fill="none" {style} stroke-linejoin="round"/>')
     out.append(
-        f'<text x="{l}" y="{t - 10}" font-size="12" fill="var(--fg)">{esc(st["station"])} · cell {st["cell"]:,} · {st["uparea_km2"]:,.0f} km² upstream · m³/s, shared scale</text>'
+        f'<text x="{l}" y="{t - 10}" font-size="12" fill="var(--fg)">{esc(st["station"])} · cell {st["cell"]:,} · {st["uparea_km2"]:,.0f} km² upstream · m³/s</text>'
     )
     bd = st.get("boundary_days_differing") or []
     out.append(
-        f'<text x="{w - r}" y="{t - 10}" text-anchor="end" font-size="11" fill="var(--muted)">spoke stamp shift {st["spoke_shift_days"]:+d} d · {st["n_compared"]} days · {st["share_equal_1e-3"]:.2%} equal'
+        f'<text x="{w - r}" y="{t - 10}" text-anchor="end" font-size="11" fill="var(--muted)">spoke stamp shift {st["spoke_shift_days"]:+d} d · {st["n_compared"]:,} days · {st["share_equal_1e-3"]:.2%} equal'
         + (f" · spoke file-boundary days differ: {', '.join(bd)}" if bd else " · max diff 0")
         + "</text>"
     )
@@ -106,6 +98,8 @@ def main() -> int:
         else pd.DataFrame(columns=["station", "date", "mirror", "spoke"])
     )
     png = base64.b64encode((OUT / "landmask.png").read_bytes()).decode()
+    snap = json.loads((OUT / "snapshots.json").read_text())  # scripts/glofas_mirror_snapshots.py
+    bf = json.loads((OUT / "backfill.json").read_text())  # scripts/glofas_mirror_runs.py
     st, by, rc, ix = c["store"], c["bytes"], c["read_cost"], c["index"]
     years = sorted(st["years_loaded"])
     allpass = c["n_pass"] == c["n_checks"]
@@ -125,6 +119,12 @@ def main() -> int:
     )
     attrs = "".join(
         f"<tr><td>{esc(k)}</td><td>{esc(str(v))}</td></tr>" for k, v in st["attrs"].items()
+    )
+    runs_tbl = "".join(
+        f"<tr><td>{r['run_id']}</td><td>{esc(r['start'][:16].replace('T', ' '))}</td><td>{r['hours']}</td><td>{len(r['years_loaded'])}: {r['years_loaded'][0]} to {r['years_loaded'][-1]}</td><td>{esc(r['result'])}{(' in task ' + r['failed_task']) if r['failed_task'] else ''}; {esc(r['message'].split('.')[0]) if r['message'] else 'all tasks finished'}</td></tr>"
+        if r["years_loaded"]
+        else f"<tr><td>{r['run_id']}</td><td>{esc(r['start'][:16].replace('T', ' '))}</td><td>{r['hours']}</td><td>none</td><td>{esc(r['result'])}; {esc(r['message'][:120])}</td></tr>"
+        for r in bf["runs"]
     )
     stations_tbl = "".join(
         f"<tr><td>{esc(s['station'])}</td><td>{s['cell']:,}</td><td>{s['lat']:.3f}, {s['lon']:.3f}</td><td>{s['uparea_km2']:,.0f}</td><td>{s['spoke_shift_days']:+d}</td><td>{s['n_compared']}</td><td>{s['share_equal_1e-3']:.2%}</td><td>{s['max_abs_diff']:.3g}</td><td>{s['one_point_history_s']} s</td></tr>"
@@ -158,14 +158,16 @@ figure{{margin:14px 0;background:var(--panel);border:1px solid var(--line);borde
 img.mask{{width:100%;max-width:100%;border:1px solid var(--line);image-rendering:auto}}
 code,pre{{font-family:var(--mono);font-size:13px}} pre{{background:var(--panel);border:1px solid var(--line);padding:12px;overflow-x:auto;border-radius:4px}}
 dl{{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:14px}} dt{{color:var(--muted)}} dd{{margin:0;min-width:0}}
+h3{{font-size:16px;margin:28px 0 6px}}
+{VIZ_CSS}
 </style>
 <main>
-<div class="eyebrow">Experiment · checked {esc(c["checked_at"][:16].replace("T", " "))} UTC · GloFAS v4 consolidated reanalysis on the team blob</div>
+<div class="eyebrow">Mirror · checked {esc(c["checked_at"][:16].replace("T", " "))} UTC · GloFAS v4 consolidated reanalysis on the team blob</div>
 <h1>GloFAS v4 mirror: {len(years)} years in the store, {c["n_pass"]} of {c["n_checks"]} checks pass</h1>
-<p class="lede">One sharded Zarr on <code>global/glofas/v4/reanalysis</code> holding every land cell of the 0.05° grid as a (cell, time) array, loaded year by year from whole-globe EWDS files. This page is the small-scale run that has to be right before the 47-year backfill is scheduled.</p>
+<p class="lede">One sharded Zarr on <code>global/glofas/v4/reanalysis</code> holding every land cell of the 0.05° grid as a (cell, time) array, loaded year by year from whole-globe EWDS files. This page is the store's own report: its layout, the checks on every loaded year, what it reads back, and how the backfill ran.</p>
 <div class="tiles">
 {tile(f"{ix['cells']:,}", "land cells in the store")}
-{tile(", ".join(years), "years loaded")}
+{tile(f"{len(years)} of 47", f"years loaded, {years[0]} to {years[-1]}")}
 {tile(f"{by['q_zarr_per_year_gb']} GB", "store per year")}
 {tile(f"{by['q_zarr_47yr_gb_projection']} GB", "projected for 1979 to 2025")}
 {tile(f"${by['cool_lrs_usd_per_month_47yr']}", "per month, Cool tier, 47 years")}
@@ -182,6 +184,7 @@ dl{{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:14
 <dt>blobs</dt><dd>{by["n_blobs"]:,} objects under the prefix</dd>
 </dl>
 <div class="wrap"><table><thead><tr><th>attribute</th><th>value</th></tr></thead><tbody>{attrs}</tbody></table></div>
+{viz_section(snap)}
 
 <h2>Checks</h2>
 <div class="wrap"><table><thead><tr><th></th><th>check</th><th>evidence</th></tr></thead><tbody>{checks}</tbody></table></div>
@@ -209,7 +212,7 @@ dl{{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;font-size:14
 <tr><td>bronze on blob</td><td>{by["bronze"] / 1e9:.2f} GB</td></tr>
 <tr><td>static (ECMWF upstream area, drain direction) and index</td><td>{(by["static"] + by["cells.parquet"]) / 1e6:.0f} MB</td></tr>
 <tr><td>what the 2,000-cell read says</td><td>a cell list across all time touches a shard per 64 cells; bulk extraction (many cells) should read whole shards, not cell lists</td></tr>
-<tr><td>47 years, projected</td><td>{by["q_zarr_47yr_gb_projection"]} GB store, {by["bronze_per_year_gb"] * 47:.0f} GB bronze; ${by["cool_lrs_usd_per_month_47yr"]} a month with bronze in the Archive tier</td></tr>
+<tr><td>47 years</td><td>{by["q_zarr_47yr_gb_projection"]} GB store and {by["bronze_per_year_gb"] * 47:.0f} GB bronze at the measured {by["q_zarr_per_year_gb"]} GB and {by["bronze_per_year_gb"]} GB a year; ${by["cool_lrs_usd_per_month_47yr"]} a month with bronze in the Archive tier</td></tr>
 </tbody></table></div>
 
 <h2>How to read it</h2>
@@ -234,8 +237,14 @@ q = pd.Series(g["q"][cell, :], index=pd.Timestamp("1979-01-01") + pd.to_timedelt
 <li><b>The EWDS key is shared.</b> The requests submitted from a laptop key were visible to the Databricks job's key without resubmission, so the key in use is the same one the daily Nigeria and Somalia monitoring queues on. A second key does not exist yet.</li>
 </ul>
 
-<h2>Before the full run</h2>
-<p>The backfill is 47 whole-globe requests, about {by["bronze_per_year_gb"] * 47:.0f} GB through EWDS, loaded one year at a time on the single-node job policy. Open before scheduling it: a second Copernicus key, or an off-season slot, so the 47 requests do not sit in the monitoring runs' queue; a dry run of the loader on a synthetic band before the job starts, so a cluster is never the first place a code error shows; an instance pool, since tonight's six cluster starts cost more than the compute; 2025 comes from the intermediate product where the consolidated one ends; v5 is a sibling prefix when it goes operational; and the code should move from the benchmark repo to its own pipeline with a KB page. Design and rejected layouts: ADR 0003 in the benchmark repo.</p>
+<h2>How the backfill ran</h2>
+<p>{bf["ewds_requests"]} whole-globe requests on the team's EWDS key, one job on the single-node policy, started three times. Every year's state lives in three ledgers (the EWDS request id, the bronze file, the load marker), so each restart skipped what was done and redid only the year it was interrupted in. {("Resubmitted to EWDS: " + ", ".join(bf["ewds_resubmitted"]) + ".") if bf["ewds_resubmitted"] else "No request had to be resubmitted."} Total {bf["hours"]} cluster hours, about ${bf["usd"]} at ${bf["usd_per_hour"]} an hour ({esc(bf["rate_note"])}).</p>
+<div class="wrap"><table><thead><tr><th>run</th><th>started (UTC)</th><th>hours</th><th>years loaded</th><th>ended with</th></tr></thead><tbody>{runs_tbl}</tbody></table></div>
+<ul>
+<li><b>Driver memory.</b> The first run stopped after 29 years when the driver stopped responding during the 2007 load: the loader held the 2.4 GB yearly file in memory and made two 1 GB copies per band, 7.7 GB resident beside the Spark driver on a 14 GB node. The file is now read from the node's disk and the band write is one copy; peak fell to 5.8 GB and a year loads in about half the time.</li>
+<li><b>A dropped download.</b> The second run stopped when EWDS closed the 2015 download at 1.7 of 2.4 GB. A broken stream is now retried from scratch, and a zero-byte bronze blob (what an aborted staged upload leaves behind) no longer counts as present.</li>
+<li><b>Open.</b> 2025 from where the consolidated product ends; a second Copernicus key so a backfill does not queue behind the monitoring runs; an instance pool, since each restart paid a cluster start; v5 as a sibling prefix when it is operational; the code moved to its own pipeline repo with a KB page. Design and rejected layouts: ADR 0003 in the benchmark repo.</li>
+</ul>
 </main>
 """
     (OUT / "index.html").write_text(html)
