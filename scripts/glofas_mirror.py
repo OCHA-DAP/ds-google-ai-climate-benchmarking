@@ -351,18 +351,35 @@ def _save_jobs(j: dict) -> None:
     )
 
 
-def _stream_to_bronze(year: int, href: str) -> int:
-    with requests.get(href, stream=True, timeout=3600) as r:
-        r.raise_for_status()
-        return _upload_stream(
-            f"bronze/glofas_v4_consolidated_{year}.nc",
-            r,
-            int(r.headers.get("Content-Length", 0)) or None,
-        )
+def _stream_to_bronze(year: int, href: str, attempts: int = 4) -> int:
+    """EWDS drops long downloads now and then (2015 broke at 1.7 of 2.4 GB on 11 Nov 2026);
+    a broken stream is restarted from scratch, the staged blocks of the failed try discarded."""
+    for i in range(1, attempts + 1):
+        try:
+            with requests.get(href, stream=True, timeout=3600) as r:
+                r.raise_for_status()
+                return _upload_stream(
+                    _bronze(year), r, int(r.headers.get("Content-Length", 0)) or None
+                )
+        except (requests.exceptions.ChunkedEncodingError, requests.exceptions.ConnectionError) as e:
+            if i == attempts:
+                raise OSError(f"{year}: download from EWDS broke {attempts} times") from e
+            print(
+                f"{year}: download broke on try {i} ({str(e)[:120]}); retrying in 60 s", flush=True
+            )
+            time.sleep(60)
+    raise AssertionError("unreachable")
 
 
 def _bronze(year: int) -> str:
     return f"bronze/glofas_v4_consolidated_{year}.nc"
+
+
+def _in_bronze(year: int) -> bool:
+    """A year counts as in bronze only with bytes behind it: clearing stale blocks before a
+    staged upload leaves a zero-byte blob if the download then breaks before the commit."""
+    bc = _container().get_blob_client(f"{PREFIX}/{_bronze(year)}")
+    return bc.exists() and bc.get_blob_properties().size > 0
 
 
 def _ledger_entry(jobs: dict, year: int) -> dict | None:
@@ -416,7 +433,7 @@ def cmd_run(
     if href:
         if len(todo) != 1:
             raise ValueError("--href takes exactly one year that is not yet loaded")
-        if _blob_exists(_bronze(todo[0])):
+        if _in_bronze(todo[0]):
             print(f"{todo[0]}: already in bronze")
         else:
             n = _stream_to_bronze(todo[0], href)
@@ -424,7 +441,7 @@ def cmd_run(
         if do_load:
             cmd_load(todo)
         return
-    need = [y for y in todo if not _blob_exists(_bronze(y))]
+    need = [y for y in todo if not _in_bronze(y)]
     for y in todo:
         if y not in need:
             print(f"{y}: already in bronze")
@@ -489,7 +506,7 @@ def cmd_run(
                     pending[y] = _submit(client, jobs, y, f"job {st} for {age_h:.1f} h")
                 else:
                     continue
-            if y not in pending and _blob_exists(_bronze(y)):
+            if y not in pending and _in_bronze(y):
                 if do_load:
                     cmd_load([y])
                 todo.remove(y)
