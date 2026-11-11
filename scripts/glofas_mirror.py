@@ -412,6 +412,7 @@ def cmd_run(
     href: str | None = None,
     do_load: bool = True,
     ewds_timeout_h: float = 6.0,
+    allow_short_last: bool = False,
 ) -> None:
     """One pass per year, every step skipped when its ledger says it is done, so a stopped or
     frozen run is simply started again with the same years:
@@ -439,7 +440,7 @@ def cmd_run(
             n = _stream_to_bronze(todo[0], href)
             print(f"{todo[0]}: {n / 1e9:.2f} GB streamed from the given link to bronze", flush=True)
         if do_load:
-            cmd_load(todo)
+            cmd_load(todo, allow_short_last)
         return
     need = [y for y in todo if not _in_bronze(y)]
     for y in todo:
@@ -508,7 +509,7 @@ def cmd_run(
                     continue
             if y not in pending and _in_bronze(y):
                 if do_load:
-                    cmd_load([y])
+                    cmd_load([y], allow_short_last)
                 todo.remove(y)
                 progressed = True
         if todo and not progressed:
@@ -563,7 +564,7 @@ def _mark_loaded(year: int, rec: dict) -> None:
     )
 
 
-def cmd_load(years: list[int]) -> None:
+def cmd_load(years: list[int], allow_short_last: bool = False) -> None:
     idx = load_index()
     store = _store()
     root = zarr.open_group(store, mode="r+")
@@ -596,9 +597,21 @@ def cmd_load(years: list[int]) -> None:
         days = (times - EPOCH).days.values
         if not np.array_equal(days, np.arange(days[0], days[0] + len(days))):
             raise AssertionError(f"{y}: file days are not consecutive")
-        if times[0] != pd.Timestamp(y, 1, 2) or times[-1] != pd.Timestamp(y + 1, 1, 1):
+        complete = times[-1] == pd.Timestamp(y + 1, 1, 1)
+        short_ok = allow_short_last and times[-1] < pd.Timestamp(y + 1, 1, 1)
+        if times[0] != pd.Timestamp(y, 1, 2) or not (complete or short_ok):
             raise AssertionError(
                 f"{y}: expected stamps {y}-01-02 .. {y + 1}-01-01, got {times[0].date()} .. {times[-1].date()}"
+                + (
+                    ""
+                    if allow_short_last
+                    else "; the product may end here: --allow-short-last-year accepts a year that stops early"
+                )
+            )
+        if not complete:
+            print(
+                f"{y}: file ends at {times[-1].date()}, {len(days)} days; accepted as the product's last year (incomplete, to be re-requested when the product extends)",
+                flush=True,
             )
         t0 = int(days[0] - t0_store)
         if t0 < 0 or t0 + len(days) > len(taxis):
@@ -648,6 +661,7 @@ def cmd_load(years: list[int]) -> None:
             "days": len(days),
             "first": str(times[0].date()),
             "last": str(times[-1].date()),
+            "complete": bool(complete),
             "nan_on_land": nan_on_land,
             "finite_off_land": finite_off_land,
             "coords_equal_index": True,
@@ -689,6 +703,13 @@ def main(argv=None) -> int:
     r.add_argument(
         "--ewds-timeout-h", type=float, default=6.0, help="resubmit a request older than this"
     )
+    for sp in (ld, r):
+        sp.add_argument(
+            "--allow-short-last-year",
+            action="store_true",
+            help="accept a year whose file ends before the 1 Jan stamp (the product's last year); "
+            "recorded as incomplete in its marker",
+        )
     s = sub.add_parser("status", help="per year: EWDS request, bronze file, load record")
     s.add_argument("years", type=int, nargs="+")
     a = p.parse_args(argv)
@@ -699,9 +720,15 @@ def main(argv=None) -> int:
     elif a.cmd == "fetch":
         cmd_fetch(a.years, a.href, a.poll, a.then_load)
     elif a.cmd == "load":
-        cmd_load(a.years)
+        cmd_load(a.years, a.allow_short_last_year)
     elif a.cmd == "run":
-        cmd_run(a.years, poll_s=a.poll, href=a.href, ewds_timeout_h=a.ewds_timeout_h)
+        cmd_run(
+            a.years,
+            poll_s=a.poll,
+            href=a.href,
+            ewds_timeout_h=a.ewds_timeout_h,
+            allow_short_last=a.allow_short_last_year,
+        )
     elif a.cmd == "status":
         cmd_status(a.years)
     return 0
