@@ -84,7 +84,7 @@ cell. Pathed by version so a v5 mirror is a sibling.
   the array attributes, so a bad year cannot be half-written.
 - Bad: a yearly append rewrites one shard column; concurrent loads of years in the same column
   must not run (the loader processes years sequentially).
-- Seen in the backfill (10 to 11 November 2026, 44 years in four runs, about 12 cluster hours):
+- Seen in the backfill (10 to 11 November 2026, 43 requests and 44 years in four runs, 10.96 cluster hours, about $5):
   the loader must read the yearly file from the node's disk, not from memory, and make one copy
   per band, or it sits at 7.7 GB resident beside the Spark driver on the 14 GB node and the
   driver is killed; EWDS drops a 2.4 GB download now and then, so the stream is retried from

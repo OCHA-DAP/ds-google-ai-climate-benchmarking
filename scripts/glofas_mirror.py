@@ -598,7 +598,8 @@ def cmd_load(years: list[int], allow_short_last: bool = False) -> None:
         if not np.array_equal(days, np.arange(days[0], days[0] + len(days))):
             raise AssertionError(f"{y}: file days are not consecutive")
         complete = times[-1] == pd.Timestamp(y + 1, 1, 1)
-        short_ok = allow_short_last and times[-1] < pd.Timestamp(y + 1, 1, 1)
+        # only the last year asked for may stop early: any other truncated file is still an error
+        short_ok = allow_short_last and y == max(years) and times[-1] < pd.Timestamp(y + 1, 1, 1)
         if times[0] != pd.Timestamp(y, 1, 2) or not (complete or short_ok):
             raise AssertionError(
                 f"{y}: expected stamps {y}-01-02 .. {y + 1}-01-01, got {times[0].date()} .. {times[-1].date()}"
