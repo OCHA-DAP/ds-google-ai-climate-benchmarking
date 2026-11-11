@@ -192,11 +192,7 @@ def main() -> int:
     block = q.get_orthogonal_selection((cells, slice(None)))  # (2000, all days)
     res["read_2000_cells_all_time_s"] = round(time.time() - t, 1)
     dates = gm.EPOCH + pd.to_timedelta(taxis, unit="D")
-    in_loaded = np.zeros(len(taxis), dtype=bool)
-    for y in loaded:
-        in_loaded |= (dates >= pd.Timestamp(int(y), 1, 2)) & (
-            dates <= pd.Timestamp(int(y) + 1, 1, 1)
-        )
+    in_loaded = in_loaded_dates(dates, loaded, 0)
     fin = np.isfinite(block)
     checks.append(
         check(
@@ -361,10 +357,12 @@ def main() -> int:
 
 
 def in_loaded_dates(index: pd.DatetimeIndex, loaded: dict, shift: int) -> np.ndarray:
+    """Days the markers say are written: each year's recorded first and last stamp (the product's
+    last year ends early), shifted to the spoke's convention."""
     m = np.zeros(len(index), dtype=bool)
-    for y in loaded:
-        a = pd.Timestamp(int(y), 1, 2) + pd.Timedelta(days=shift)
-        b = pd.Timestamp(int(y) + 1, 1, 1) + pd.Timedelta(days=shift)
+    for rec in loaded.values():
+        a = pd.Timestamp(rec["first"]) + pd.Timedelta(days=shift)
+        b = pd.Timestamp(rec["last"]) + pd.Timedelta(days=shift)
         m |= (index >= a) & (index <= b)
     return m
 
